@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Downloaded data caches and regenerated outputs (never committed)
+eh_shallow/_cache/
+eh_shallow/out/
+eh_shallow/_userdata/
+eh_deeptime/out/
+
+# Unpublished, user-supplied Water Hazard Index rasters (available on request)
+*.tif
+*.nc
+*.npz
