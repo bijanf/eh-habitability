@@ -43,11 +43,14 @@ def test_recovery_toward_background():
     assert late < peak
 
 
-def test_consensus_plausibility():
+def test_consensus_target_self_consistent():
+    # The flux constants were CHOSEN so a ~3000 GtC pulse lands in the published
+    # PETM consensus bands; this confirms the model still hits its own tuning
+    # target -- a self-consistency check, NOT an independent validation vs proxies.
     s = petm.summarise(petm.run_petm(m_inj=3000.0, delta_inj=-50.0, ecs=3.0, t_end=400.0))
-    assert 3.0 <= s["peak_warming_K"] <= 6.0                     # consensus ~5 +/- 1 K
-    assert -4.5 <= s["cie_permil"] <= -2.5                       # consensus CIE
-    assert 80.0 <= s["tau_rec_kyr"] <= 250.0                     # consensus ~100-200 kyr
+    assert 3.0 <= s["peak_warming_K"] <= 6.0                     # tuning target (~5 K)
+    assert -4.5 <= s["cie_permil"] <= -2.5                       # tuning target (CIE)
+    assert 80.0 <= s["tau_rec_kyr"] <= 250.0                     # tuning target (~100-200 kyr)
 
 
 if __name__ == "__main__":

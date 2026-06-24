@@ -1,32 +1,47 @@
-# eh_deeptime — illustrative deep-time carbon-cycle box model
+# eh_deeptime — illustrative deep-time Earth-habitability framework
 
-A **light, transparent illustration** for the Nature Reviews Earth & Environment Perspective
-*"Deep time, shallow time, and the multi-sphere model of Earth habitability."* It shows that the
-multi-sphere approach is operationalisable in deep time, via a 0-D (well-mixed) carbon-cycle response
-to a PETM-scale carbon release.
+A **light, transparent, fully offline** illustration accompanying the Nature Reviews Earth &
+Environment Perspective. It demonstrates that the multi-sphere approach to Earth habitability is
+*operationalisable in deep time* — coupling a closed biogeochemical cycle, a climate model, and a
+probabilistic habitability metric into a deep-time Habitable Area Fraction.
 
-**What it is / is not.** This is an *illustration*, not a research-grade model: there is **no**
-Bayesian calibration, **no** out-of-sample validation, and **no** parameter inference. It runs a
-forward simulation at consensus PETM parameters (with a carbon-release band) and produces one figure.
+> **What it is / is not.** This is an **illustration / methods demonstration**, *not* a research-grade
+> model. There is **no calibration to real proxy data, no out-of-sample validation, and no fabricated
+> datasets**. Every input is either a published parameter envelope or an explicitly-labelled
+> synthetic / illustrative field. Each module carries an honest scope statement and a `PRODUCTION SWAP`
+> note describing what a real implementation would add (Bayesian calibration against compiled proxies,
+> 2-D geography, PyMC/Stan or JAX, sulfur/oxygen isotopes, etc.).
 
-It follows the structure of LOSCAR-class long-term carbon-cycle box models (Zeebe 2012; the iLOSCAR
-Python re-implementation, Liu et al. 2024) and the COPSE/GEOCARBSULF silicate-weathering feedback
-(Berner 2006; Lenton et al. 2018), reduced to the minimum needed for an illustration. Flux constants
-are illustrative: chosen so the no-injection control is in exact steady state, and a ~3000 Gt C release
-reproduces the consensus PETM peak warming (~4–5 K), carbon-isotope excursion (−2.5…−4.5 ‰) and
-~100–200 kyr recovery, with attendant ocean acidification.
+## Modules
+
+| Module | What it does |
+|---|---|
+| `petm.py` | 0-D carbon-cycle box model (DIC, ALK, δ¹³C) → the PETM hindcast figure (Fig. of the Perspective). |
+| `carbon_sulfur.py` | **Closed 9-state** carbon–sulfur–oxygen–alkalinity–isotope box model (generalises `petm`). Total C **and** total S conserved to machine precision; control steady by construction. Directly answers the referee point that the carbon core was "a single ODE … no closed C–S–O system". |
+| `ebm.py` | 1-D North-class diffusive energy-balance climate model: `T(latitude)`, global mean, ice line. |
+| `habitability.py` | Guild-mixture Bayesian-logistic habitability metric, fit by penalised IRLS to **synthetic draws from published tolerance envelopes** (four guilds). `P_hab(x) = max_g P_hab^(g)(x)`. |
+| `smc.py` | Tempered Sequential Monte Carlo **identical-twin parameter recovery** — recovers a known truth from synthetic pseudo-data (sampler self-consistency check, *not* calibration). |
+| `sensitivity.py` | Saltelli/Sobol variance-based sensitivity (low-discrepancy Sobol sequence) + Jensen-bias spatial-aggregation analysis. |
+| `haf.py` | Illustrative **deep-time Habitable Area Fraction**: synthetic CO₂ forcing → climate → habitability over latitude. |
+| `plots.py` | Nature-style vector figures (88/180 mm, ≤7 pt sans-serif, `pdf.fonttype 42`). |
+| `framework.py` | One-call driver that runs every module and writes the figures + `framework_metrics.json`. |
 
 ## Run
 
 ```bash
-python -m eh_deeptime.run            # writes eh_deeptime/out/petm_illustration.pdf (+ .json)
-python tests/test_eh_deeptime.py     # offline smoke tests (also: pytest tests/test_eh_deeptime.py)
+python -m eh_deeptime.run                  # the PETM illustration figure (Fig. 3)
+python -m eh_deeptime.framework            # full framework: 6 figures + metrics.json -> out/
+python -m eh_deeptime.framework --quick    # faster smoke run (smaller SMC/Sobol samples)
+python -m pytest -q tests/                 # offline test suite (49 sanity/plausibility checks)
 ```
 
-Runs fully offline (numpy + scipy + matplotlib only). The figure is the deep-time panel of the
-Perspective (Fig. 3): coupled carbon → climate → biosphere (δ¹³C) → ocean-chemistry response.
+Everything runs offline with numpy + scipy + matplotlib only. `framework.py` writes, into `out/`:
+`csys_response.pdf` (closed C–S–O response), `ebm_climate.pdf`, `habitability.pdf`, `smc_recovery.pdf`,
+`sensitivity.pdf`, `deeptime_haf.pdf`, plus `framework_metrics.json`.
 
-## Files
-- `petm.py` — the box model (`run_petm`, `summarise`) and carbonate-chemistry solver.
-- `plots.py` — the Nature-style 4-panel figure.
-- `run.py` — builds the consensus ensemble and writes the figure + metadata.
+## Honesty checks baked into the tests
+
+The tests are **sanity / plausibility checks, not validation gates**: mass conservation (C and S to
+~1e-13), control steadiness, monotone responses, SMC bracketing of the planted truth, Sobol `Sₜ ≥ S₁`,
+unit-interval probabilities, and self-consistency with the tuning targets the constants were set to hit
+(explicitly *not* an independent comparison with proxy data).

@@ -66,7 +66,15 @@ def _carbonate_solve(dic_conc, alk_conc):
         co3 = dic_conc * K1 * K2 / denom
         return hco3 + 2.0 * co3 - alk_conc
 
-    h = brentq(alk_residual, 10.0 ** -9.5, 10.0 ** -5.5, maxiter=200, xtol=1e-18)
+    # bracket [H+] over pH 4-11 -- wide enough that even strongly perturbed
+    # (DIC, ALK) states keep the root inside it; guard a degenerate same-sign bracket
+    # so a clear error is raised instead of brentq's opaque ValueError.
+    lo, hi = 10.0 ** -11, 10.0 ** -4
+    if alk_residual(lo) * alk_residual(hi) > 0.0:
+        raise ValueError(
+            f"carbonate solve: no pH root in [4, 11] for DIC={dic_conc:.3e}, "
+            f"ALK={alk_conc:.3e} mol/kg")
+    h = brentq(alk_residual, lo, hi, maxiter=200, xtol=1e-18)
     denom = h * h + K1 * h + K1 * K2
     co2aq = dic_conc * h * h / denom
     co3 = dic_conc * K1 * K2 / denom
@@ -114,7 +122,7 @@ def _injection_rate(t, m_inj_mol, t_dur):
     return m_inj_mol / t_dur * (1.0 - np.cos(2.0 * np.pi * t / t_dur))
 
 
-def _rhs(t, y, m_inj_mol, t_dur):
+def _rhs(t, y, m_inj_mol, t_dur, delta_inj):
     dic_mol, alk_mol, d13c = y
     dic_conc = dic_mol / M_OCEAN
     alk_conc = alk_mol / M_OCEAN
@@ -135,13 +143,9 @@ def _rhs(t, y, m_inj_mol, t_dur):
     dd13c = (F_VOLC * (DELTA_VOLC - d13c)
              + f_carbw * (_BG["delta_carbw"] - d13c)
              + f_diss * (D13C_0 - d13c)
-             + f_inj * (DELTA_INJ_HOLDER[0] - d13c)
+             + f_inj * (delta_inj - d13c)
              + F_BORG0 * DELTA_ORG_FRAC) / dic_mol
     return [ddic, dalk, dd13c]
-
-
-# small module-level holder so _rhs can see delta_inj without re-threading scipy args
-DELTA_INJ_HOLDER = [-50.0]
 
 
 def run_petm(m_inj=3000.0, t_dur=5.0, delta_inj=-50.0, ecs=3.0,
@@ -167,12 +171,11 @@ def run_petm(m_inj=3000.0, t_dur=5.0, delta_inj=-50.0, ecs=3.0,
         kyr = np.linspace(-20.0, t_end, n_out)
     kyr = np.asarray(kyr, dtype=float)
     m_inj_mol = m_inj * GTC_TO_MOL
-    DELTA_INJ_HOLDER[0] = delta_inj
 
     y0 = [_BG["dic0_mol"], _BG["alk0_mol"], D13C_0]
     teval = kyr[kyr >= 0.0]
     sol = solve_ivp(_rhs, (0.0, kyr.max()), y0, t_eval=teval,
-                    args=(m_inj_mol, t_dur), method="LSODA",
+                    args=(m_inj_mol, t_dur, delta_inj), method="LSODA",
                     rtol=1e-7, atol=[1e10, 1e10, 1e-6], max_step=2.0)
     if not sol.success:
         raise RuntimeError(f"PETM integration failed: {sol.message}")
