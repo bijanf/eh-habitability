@@ -19,8 +19,10 @@ smc           tempered-SMC identical-twin parameter recovery (a sampler
               self-consistency demonstration on synthetic pseudo-data -- NOT
               calibration to proxies, NOT validation).
 sensitivity   Saltelli/Sobol variance-based sensitivity + Jensen-bias aggregation.
-haf           illustrative deep-time Habitable Area Fraction (carbon -> climate ->
-              habitability) on a synthetic CO2 forcing.
+haf           deep-time Habitable Area Fraction HAF(t) through a carbon-release
+              event, driven ENTIRELY by the carbon_sulfur box model's own pCO2(t)
+              and ocean pH(t) (carbon -> climate -> ocean chemistry ->
+              habitability); no synthetic, analytic or proxy time-series.
 plots         Nature-style vector figures for all of the above.
 framework     one-call driver: `python -m eh_deeptime.framework` runs every module
               and writes the figures + a metrics.json.

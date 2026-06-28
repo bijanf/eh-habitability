@@ -27,6 +27,7 @@ _ISO = "#2166ac"        # carbon isotopes (blue)
 _OCEAN = "#1b7837"      # ocean chemistry (green)
 _O2 = "#762a83"         # oxygen (purple)
 _SULF = "#8c510a"       # sulfur (brown)
+_HAB = "#35978f"        # habitability / HAF (teal)
 
 
 def _panel(ax, kyr, central, lo, hi, color, ylabel, title, target=None):
@@ -206,21 +207,80 @@ def plot_sensitivity(sobol, jb, path):
     return path
 
 
-def plot_deeptime_haf(res, path):
-    """Illustrative deep-time HAF: synthetic CO2 forcing -> climate -> habitability."""
-    t = res["t_myr"]
-    fig, axs = plt.subplots(3, 1, figsize=(ONE_COL * 1.7, 110 * MM), sharex=True)
-    axs[0].semilogy(t, res["co2"], color=_CARBON, lw=1.0)
-    axs[0].set_ylabel("CO$_2$ (ppm)")
-    axs[0].set_title("a  Forcing (synthetic, illustrative)", loc="left",
-                     fontweight="bold")
-    axs[1].plot(t, res["t_global_C"], color=_CLIM, lw=1.0)
-    axs[1].set_ylabel("Global T (°C)")
-    axs[1].set_title("b  Climate", loc="left", fontweight="bold")
-    axs[2].plot(t, res["haf"], color=_OCEAN, lw=1.0)
-    axs[2].set_ylabel("HAF")
-    axs[2].set_xlabel("Model time (Myr, illustrative)")
-    axs[2].set_title("c  Habitable area fraction", loc="left", fontweight="bold")
+def plot_coupled_haf(res, path, tmax=300.0):
+    """HAF through a carbon-release event, driven by the closed C-S-O box model.
+
+    Every panel is a forward-model time-series on a common time axis (NO synthetic
+    or proxy series): the box model's atmospheric CO2(t), surface warming(t) and
+    surface-ocean pH(t), and the habitable area fraction HAF(t) they imply via the
+    1-D EBM + guild-mixture metric at fixed open-marine water activity.
+
+    `res` is an eh_deeptime.haf.coupled_event_haf output.
+    """
+    kyr = res["kyr"]
+    m = kyr <= tmax
+    fig, axs = plt.subplots(2, 2, figsize=(TWO_COL, 95 * MM))
+    _line(axs[0, 0], kyr[m], res["co2"][m], _CARBON,
+          "Atmospheric CO$_2$ (ppm)", "a  Carbon (model)")
+    _line(axs[0, 1], kyr[m], res["temp_anom_K"][m], _CLIM,
+          "Surface warming (K)", "b  Climate (model)")
+    _line(axs[1, 0], kyr[m], res["ph_ocean"][m], _OCEAN,
+          "Surface ocean pH", "c  Ocean acidification (model)")
+    _line(axs[1, 1], kyr[m], res["haf"][m], _HAB,
+          "Habitable area fraction", "d  Habitability (HAF)")
+    fig.tight_layout(pad=0.6)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_deeptime_combined(csys, hafres, path, tmax=300.0):
+    """Combined deep-time illustration for the Perspective.
+
+    Panels a-e: the CLOSED C-S-O-alkalinity-isotope box model's response to a
+    PETM-scale carbon pulse, showing one perturbation cascading carbon ->
+    climate -> isotopes -> ocean chemistry -> oxygen + sulfur in a system that
+    conserves total C and total S to machine precision. Panel f: the Habitable
+    Area Fraction HAF(t) implied by the coupled chain, on the SAME time axis --
+    the box model's pCO2(t) and ocean pH(t) drive the EBM + guild-mixture metric.
+
+    `csys` = carbon_sulfur.run_csys output; `hafres` = haf.coupled_event_haf
+    output computed from the SAME csys. Every panel is forward-model output; no
+    synthetic, analytic or proxy time-series appears anywhere in this figure.
+    This is an ILLUSTRATION of operationalisability, not a reconstruction.
+    """
+    kyr = csys["kyr"]
+    m = kyr <= tmax
+    fig, axs = plt.subplots(2, 3, figsize=(TWO_COL, 95 * MM))
+    _line(axs[0, 0], kyr[m], csys["pco2"][m], _CARBON,
+          "Atmospheric CO$_2$ (ppm)", "a  Carbon")
+    _line(axs[0, 1], kyr[m], csys["temp"][m], _CLIM,
+          "Surface warming (K)", "b  Climate")
+    _line(axs[0, 2], kyr[m], csys["d13c"][m], _ISO,
+          r"DIC $\delta^{13}$C (‰)", "c  Carbon isotopes")
+    _line(axs[1, 0], kyr[m], csys["ph"][m], _OCEAN,
+          "Surface ocean pH", "d  Ocean acidification")
+    # panel e: the two closed-system reservoirs that make this a C-S-O cycle
+    axe = axs[1, 1]
+    axe.plot(kyr[m], csys["o2"][m] * 100.0, color=_O2, lw=1.0)
+    axe.axvline(0.0, color="0.5", lw=0.5, ls=":")
+    axe.set_xlabel("Time relative to onset (kyr)")
+    axe.set_ylabel("O$_2$ (% of present)", color=_O2)
+    axe.tick_params(axis="y", labelcolor=_O2)
+    axe.set_title("e  Closed O$_2$ + S reservoirs", loc="left", fontweight="bold")
+    axe2 = axe.twinx()
+    axe2.plot(kyr[m], (csys["so4"][m] - csys["so4"][0]) / 1e15, color=_SULF, lw=1.0)
+    axe2.set_ylabel(r"$\Delta$ ocean SO$_4$ (10$^{15}$ mol)", color=_SULF)
+    axe2.tick_params(axis="y", labelcolor=_SULF)
+    # panel f: HAF(t) on the same time axis as a-e (the coupled chain's output)
+    mh = hafres["kyr"] <= tmax
+    axf = axs[1, 2]
+    axf.plot(hafres["kyr"][mh], hafres["haf"][mh], color=_HAB, lw=1.2)
+    axf.axvline(0.0, color="0.5", lw=0.5, ls=":")
+    axf.set_xlim(-20, tmax)
+    axf.set_xlabel("Time relative to onset (kyr)")
+    axf.set_ylabel("Habitable area fraction")
+    axf.set_title("f  Habitability (HAF)", loc="left", fontweight="bold")
     fig.tight_layout(pad=0.6)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)

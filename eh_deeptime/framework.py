@@ -10,7 +10,7 @@ figures plus a ``framework_metrics.json`` into the output directory:
     habitability.pdf    guild-mixture habitability surface + guild niches
     smc_recovery.pdf    identical-twin SMC parameter recovery (synthetic pseudo-data)
     sensitivity.pdf     Sobol sensitivity (peak warming) + Jensen aggregation bias
-    deeptime_haf.pdf    illustrative deep-time Habitable Area Fraction
+    coupled_haf.pdf     HAF(t) through a carbon pulse, driven by the C-S-O model
 
 EVERYTHING here is an ILLUSTRATION: synthetic / published-envelope inputs only, no
 calibration to real proxy data, no out-of-sample validation, and no fabricated
@@ -96,9 +96,30 @@ def _sensitivity_fig(out, quick=False):
 
 
 def _haf_fig(out):
-    res = haf.deeptime_haf()
-    plots.plot_deeptime_haf(res, os.path.join(out, "deeptime_haf.pdf"))
+    res = haf.coupled_event_haf()
+    plots.plot_coupled_haf(res, os.path.join(out, "coupled_haf.pdf"))
     return haf.summarise(res)
+
+
+def _deeptime_combined_fig(out):
+    """Combined deep-time figure for the Perspective: closed C-S-O response to a
+    PETM-scale pulse (a-e) + the HAF(t) it implies (f), on a common time axis.
+
+    Panel (f) is computed from the SAME carbon-sulfur run as panels (a-e), so the
+    whole figure is one self-consistent forward simulation with no synthetic,
+    analytic or proxy time-series anywhere."""
+    csys = carbon_sulfur.run_csys(m_inj=3000.0, t_dur=5.0, delta_inj=-50.0,
+                                  t_end=400.0)
+    hafres = haf.coupled_event_haf(csys=csys)
+    plots.plot_deeptime_combined(csys, hafres,
+                                 os.path.join(out, "deeptime_framework.pdf"))
+    cs = carbon_sulfur.summarise(csys)
+    hs = haf.summarise(hafres)
+    return {"peak_warming_K": cs["peak_warming_K"], "cie_permil": cs["cie_permil"],
+            "tau_rec_kyr": cs["tau_rec_kyr"],
+            "haf_background": hs["haf_background"], "haf_min": hs["haf_min"],
+            "haf_drawdown": hs["haf_drawdown"],
+            "co2_at_haf_min_ppm": hs["co2_at_haf_min_ppm"]}
 
 
 def main():
@@ -122,12 +143,14 @@ def main():
     metrics["smc"] = _smc_fig(args.out, quick=args.quick)
     print("[framework] Sobol sensitivity + Jensen-bias aggregation ...")
     metrics["sensitivity"] = _sensitivity_fig(args.out, quick=args.quick)
-    print("[framework] illustrative deep-time HAF ...")
-    metrics["deeptime_haf"] = _haf_fig(args.out)
+    print("[framework] coupled HAF(t) through a carbon pulse ...")
+    metrics["coupled_haf"] = _haf_fig(args.out)
+    print("[framework] combined deep-time figure (closed C-S-O + HAF) ...")
+    metrics["deeptime_combined"] = _deeptime_combined_fig(args.out)
 
     with open(os.path.join(args.out, "framework_metrics.json"), "w") as fh:
         json.dump(metrics, fh, indent=2, default=float)
-    print(f"\nwrote 6 figures + framework_metrics.json to {args.out}")
+    print(f"\nwrote 7 figures + framework_metrics.json to {args.out}")
     print(json.dumps(metrics, indent=2, default=float))
 
 

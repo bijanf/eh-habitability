@@ -22,7 +22,7 @@ probabilistic habitability metric into a deep-time Habitable Area Fraction.
 | `habitability.py` | Guild-mixture Bayesian-logistic habitability metric, fit by penalised IRLS to **synthetic draws from published tolerance envelopes** (four guilds). `P_hab(x) = max_g P_hab^(g)(x)`. |
 | `smc.py` | Tempered Sequential Monte Carlo **identical-twin parameter recovery** — recovers a known truth from synthetic pseudo-data (sampler self-consistency check, *not* calibration). |
 | `sensitivity.py` | Saltelli/Sobol variance-based sensitivity (low-discrepancy Sobol sequence) + Jensen-bias spatial-aggregation analysis. |
-| `haf.py` | Illustrative **deep-time Habitable Area Fraction**: synthetic CO₂ forcing → climate → habitability over latitude. |
+| `haf.py` | **Deep-time Habitable Area Fraction HAF(t)** through a carbon-release event, driven entirely by the `carbon_sulfur` box model's own pCO₂(t) and ocean pH(t) (carbon → climate → ocean chemistry → habitability over latitude). No synthetic/analytic/proxy time-series; water activity held at the fixed open-marine value. |
 | `plots.py` | Nature-style vector figures (88/180 mm, ≤7 pt sans-serif, `pdf.fonttype 42`). |
 | `framework.py` | One-call driver that runs every module and writes the figures + `framework_metrics.json`. |
 
@@ -37,7 +37,8 @@ python -m pytest -q tests/                 # offline test suite (49 sanity/plaus
 
 Everything runs offline with numpy + scipy + matplotlib only. `framework.py` writes, into `out/`:
 `csys_response.pdf` (closed C–S–O response), `ebm_climate.pdf`, `habitability.pdf`, `smc_recovery.pdf`,
-`sensitivity.pdf`, `deeptime_haf.pdf`, plus `framework_metrics.json`.
+`sensitivity.pdf`, `coupled_haf.pdf` (model-driven HAF(t) through a carbon pulse),
+`deeptime_framework.pdf` (the combined Perspective figure), plus `framework_metrics.json`.
 
 ## Honesty checks baked into the tests
 
