@@ -181,26 +181,54 @@ def plot_smc(post, path):
     return path
 
 
-def plot_sensitivity(sobol, jb, path):
-    """Sobol first/total indices (peak warming) + Jensen aggregation bias vs CO2."""
-    fig, axs = plt.subplots(1, 2, figsize=(TWO_COL, 65 * MM))
+def _ci_err(point, ci):
+    """Convert a (d,2) [p05,p95] CI to matplotlib yerr (2,d) [lower, upper]."""
+    point = np.asarray(point)
+    ci = np.asarray(ci)
+    lo = np.clip(point - ci[:, 0], 0, None)
+    hi = np.clip(ci[:, 1] - point, 0, None)
+    return np.vstack([lo, hi])
+
+
+def plot_sensitivity(sobol, jb, path, shap=None):
+    """Sobol S1/ST (with bootstrap CIs if present) + optional Shapley effects + Jensen.
+
+    `sobol` may carry 'S1_ci'/'ST_ci' (drawn as error bars). If `shap` is given
+    (a sensitivity.shapley_effects output) a Shapley-effects panel is added.
+    """
+    ncol = 3 if shap is not None else 2
+    fig, axs = plt.subplots(1, ncol, figsize=(TWO_COL, 65 * MM))
     names = sobol["names"]
     xpos = np.arange(len(names))
     width = 0.38
-    axs[0].bar(xpos - width / 2, sobol["S1"], width, label="$S_1$ (first-order)",
-               color="#4393c3")
-    axs[0].bar(xpos + width / 2, sobol["ST"], width, label="$S_T$ (total)",
-               color="#b2182b")
+    e1 = _ci_err(sobol["S1"], sobol["S1_ci"]) if "S1_ci" in sobol else None
+    eT = _ci_err(sobol["ST"], sobol["ST_ci"]) if "ST_ci" in sobol else None
+    axs[0].bar(xpos - width / 2, sobol["S1"], width, yerr=e1, capsize=2,
+               error_kw={"lw": 0.6}, label="$S_1$ (first-order)", color="#4393c3")
+    axs[0].bar(xpos + width / 2, sobol["ST"], width, yerr=eT, capsize=2,
+               error_kw={"lw": 0.6}, label="$S_T$ (total)", color="#b2182b")
     axs[0].set_xticks(xpos)
     axs[0].set_xticklabels(names, rotation=30, ha="right")
     axs[0].set_ylabel("Sobol index")
-    axs[0].set_title("a  Sensitivity of peak warming", loc="left", fontweight="bold")
+    axs[0].set_title("a  Sobol sensitivity (peak warming)", loc="left", fontweight="bold")
     axs[0].legend(fontsize=5, frameon=False)
-    axs[1].axhline(0.0, color="0.6", lw=0.5)
-    axs[1].semilogx(jb["co2"], jb["delta_J"], "o-", color=_OCEAN, lw=1.0, ms=3)
-    axs[1].set_xlabel("Atmospheric CO$_2$ (ppm)")
-    axs[1].set_ylabel(r"$\delta_J = f_{hab} - P_{hab}(\bar{x})$")
-    axs[1].set_title("b  Aggregation (Jensen) bias", loc="left", fontweight="bold")
+
+    if shap is not None:
+        sh = np.asarray(shap["shapley"])
+        axs[1].bar(np.arange(len(shap["names"])), sh, color="#5aae61")
+        axs[1].set_xticks(np.arange(len(shap["names"])))
+        axs[1].set_xticklabels(shap["names"], rotation=30, ha="right")
+        axs[1].set_ylabel("Shapley effect")
+        axs[1].set_title(f"b  Shapley effects ($\\Sigma$={np.nansum(sh):.2f})",
+                         loc="left", fontweight="bold")
+
+    axj = axs[ncol - 1]
+    axj.axhline(0.0, color="0.6", lw=0.5)
+    axj.semilogx(jb["co2"], jb["delta_J"], "o-", color=_OCEAN, lw=1.0, ms=3)
+    axj.set_xlabel("Atmospheric CO$_2$ (ppm)")
+    axj.set_ylabel(r"$\delta_J = f_{hab} - P_{hab}(\bar{x})$")
+    axj.set_title(f"{'c' if shap is not None else 'b'}  Aggregation (Jensen) bias",
+                  loc="left", fontweight="bold")
     fig.tight_layout(pad=0.6)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -228,6 +256,72 @@ def plot_coupled_haf(res, path, tmax=300.0):
           "Surface ocean pH", "c  Ocean acidification (model)")
     _line(axs[1, 1], kyr[m], res["haf"][m], _HAB,
           "Habitable area fraction", "d  Habitability (HAF)")
+    fig.tight_layout(pad=0.6)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_subsurface(resp, h3, path):
+    """Subsurface-biosphere carbon (H3): present-day anchor + warming response.
+
+    `resp` = subsurface.warming_response output; `h3` = subsurface.h3_consistency.
+    Left: stock vs surface warming with the Magnabosco (2018) 23-31 Pg C band
+    shaded (the anchored present-day value). Right: habitable depth vs warming.
+    The absolute scale is anchored to the literature; the response is model output.
+    """
+    fig, axs = plt.subplots(1, 2, figsize=(TWO_COL, 62 * MM))
+    lo, hi = h3["magnabosco2018_PgC"]
+    axs[0].axhspan(lo, hi, color="#5aae61", alpha=0.18, lw=0,
+                   label="Magnabosco 2018 (23–31 Pg C)")
+    axs[0].plot(resp["delta_T_C"], resp["stock_PgC"], color=_HAB, lw=1.2)
+    axs[0].set_xlabel("Surface warming (K)")
+    axs[0].set_ylabel("Habitable subsurface C (Pg C)")
+    axs[0].set_title("a  Subsurface carbon (anchored)", loc="left", fontweight="bold")
+    axs[0].legend(fontsize=5, frameon=False, loc="upper right")
+    axs[1].plot(resp["delta_T_C"], resp["habitable_depth_km"], color=_CLIM, lw=1.2)
+    axs[1].set_xlabel("Surface warming (K)")
+    axs[1].set_ylabel("Habitable depth to 122 °C (km)")
+    axs[1].set_title("b  Habitable depth window", loc="left", fontweight="bold")
+    fig.tight_layout(pad=0.6)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_structural_benchmark(comp, path):
+    """Forest plot: our box model vs PUBLISHED community-model + proxy diagnostics.
+
+    `comp` is an eh_deeptime.benchmark.structural_comparison output. Three panels
+    (peak warming, CIE, recovery); each published study is a point or range
+    (blue = model, green = proxy/observational), our box model is a red line.
+    This is an inter-model structural-spread INDICATOR + proxy plausibility check,
+    NOT validation: LOSCAR/cGENIE/iLOSCAR are models, not data.
+    """
+    diags = [("peak_warming_K", "Peak warming (K)", "a  Climate"),
+             ("cie_permil", r"CIE ($\delta^{13}$C, ‰)", "b  Carbon isotopes"),
+             ("recovery_kyr", "Recovery time (kyr)", "c  Recovery")]
+    fig, axs = plt.subplots(1, 3, figsize=(TWO_COL, 70 * MM))
+    for ax, (field, xlabel, title) in zip(axs, diags):
+        rows = [r for r in comp["published"] if r.get(field) is not None]
+        y = np.arange(len(rows))
+        for i, r in enumerate(rows):
+            lo, hi = r[field]
+            col = _O2 if r["kind"] == "model" else _HAB
+            if hi > lo:
+                ax.plot([lo, hi], [i, i], color=col, lw=2.0, alpha=0.8,
+                        solid_capstyle="butt")
+            ax.plot([(lo + hi) / 2], [i], "o", color=col, ms=4)
+        ax.set_yticks(y)
+        ax.set_yticklabels([r["key"] for r in rows], fontsize=4.5)
+        v = comp["by_diag"][field]["ours"]
+        if v is not None:
+            ax.axvline(v, color=_CLIM, lw=1.2, ls="--",
+                       label=f"this box model ({v:.1f})")
+            ax.legend(fontsize=4.5, frameon=False, loc="lower right")
+        ax.set_xlabel(xlabel)
+        ax.set_title(title, loc="left", fontweight="bold")
+        ax.margins(y=0.15)
     fig.tight_layout(pad=0.6)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)

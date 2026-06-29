@@ -41,6 +41,8 @@ with reconstructed or modelled environmental fields.
 """
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 from scipy.stats import qmc
 
@@ -115,7 +117,7 @@ def _scale_sample(unit, bounds):
 
 
 def sobol_indices(model_fn=None, bounds=None, names=None,
-                  n_base=256, seed=0):
+                  n_base=256, seed=0, n_boot=0):
     """First-order (S1) and total-effect (ST) Sobol indices (Saltelli 2010 design).
 
     Uses the standard radial A/B/AB estimator: two independent base samples A and
@@ -134,10 +136,14 @@ def sobol_indices(model_fn=None, bounds=None, names=None,
     names : list[str]|None       input names (length d); default DEFAULT_SOBOL_NAMES.
     n_base : int                 base-sample size (total runs = n_base*(d+2)).
     seed : int                   RNG seed for the base samples.
+    n_boot : int                 if >0, add 5-95% bootstrap confidence intervals on
+                                 S1/ST by resampling the base rows (NO extra model
+                                 evaluations -- it re-uses the cached A/B/AB outputs).
 
     Returns
     -------
-    dict with keys 'names' (list), 'S1' (ndarray, d), 'ST' (ndarray, d).
+    dict with keys 'names' (list), 'S1' (ndarray, d), 'ST' (ndarray, d), and -- if
+    n_boot>0 -- 'S1_ci' and 'ST_ci' (each (d,2): [p05, p95]).
     Indices are sanity/illustrative; not a calibrated attribution.
     """
     if names is None and bounds is None:
@@ -185,7 +191,120 @@ def sobol_indices(model_fn=None, bounds=None, names=None,
         # Jansen (1999) total-effect estimator
         ST[i] = float(0.5 * np.mean((yA - yAB[:, i]) ** 2)) / var
 
-    return {"names": list(names), "S1": S1, "ST": ST}
+    out = {"names": list(names), "S1": S1, "ST": ST}
+    if n_boot and n_boot > 0:
+        # bootstrap the base rows; recompute the SAME estimators on each resample.
+        # No new model runs -- this only resamples the cached yA/yB/yAB outputs.
+        rb = np.random.default_rng(seed + 1)
+        nrow = yA.shape[0]
+        S1b = np.full((n_boot, d), np.nan)
+        STb = np.full((n_boot, d), np.nan)
+        for b in range(n_boot):
+            idx = rb.integers(0, nrow, nrow)
+            ya, yb, yab = yA[idx], yB[idx], yAB[idx]
+            vb = float(np.var(np.concatenate([ya, yb]), ddof=1))
+            if vb <= 0.0:
+                continue
+            for i in range(d):
+                S1b[b, i] = float(np.mean(yb * (yab[:, i] - ya))) / vb
+                STb[b, i] = float(0.5 * np.mean((ya - yab[:, i]) ** 2)) / vb
+        out["S1_ci"] = np.nanpercentile(S1b, [5, 95], axis=0).T   # (d, 2)
+        out["ST_ci"] = np.nanpercentile(STb, [5, 95], axis=0).T
+    return out
+
+
+# --- Shapley effects (Song, Nelson & Staum 2016) -----------------------------
+def _closed_effect_cache(model_fn, bounds, d, n_outer, n_inner, var_total, rng):
+    """Memoised closed effect c(J) = Var_{X_J}(E[Y | X_J]) / Var(Y).
+
+    Estimated by the double-loop Monte-Carlo of Song, Nelson & Staum (2016): for a
+    set J of inputs, sample ``n_outer`` outer points of X_J; for each, sample
+    ``n_inner`` inner points of the complement X_{-J}, average the model to estimate
+    E[Y | X_J], then take the variance of those conditional means. c(empty)=0 and
+    c(all)=1 by construction (deterministic model). Memoised by frozenset(J).
+    """
+    lo = np.array([b[0] for b in bounds])
+    hi = np.array([b[1] for b in bounds])
+    cache = {frozenset(): 0.0, frozenset(range(d)): 1.0}
+
+    def c(J):
+        key = frozenset(J)
+        if key in cache:
+            return cache[key]
+        J = sorted(J)
+        comp = [k for k in range(d) if k not in J]
+        means = np.empty(n_outer)
+        for o in range(n_outer):
+            xJ = lo[J] + rng.random(len(J)) * (hi[J] - lo[J])
+            ys = np.empty(n_inner)
+            for ii in range(n_inner):
+                x = np.empty(d)
+                x[J] = xJ
+                x[comp] = lo[comp] + rng.random(len(comp)) * (hi[comp] - lo[comp])
+                ys[ii] = model_fn(x)
+            means[o] = ys.mean()
+        val = float(np.var(means, ddof=1) / var_total)
+        cache[key] = val
+        return val
+
+    return c
+
+
+def shapley_effects(model_fn=None, bounds=None, names=None,
+                    n_outer=64, n_inner=6, n_var=1024, n_perms=None, seed=0):
+    """Shapley effects for global sensitivity (Song, Nelson & Staum 2016).
+
+    Unlike Sobol indices, Shapley effects allocate interaction variance fairly among
+    the inputs and SUM TO 1 (the total output variance), so they have no ambiguity
+    when inputs interact. Implemented WITHOUT SALib (which lacks a Shapley estimator)
+    via the exact-permutation method with the double-loop closed-effect cost
+    (:func:`_closed_effect_cache`); for d<=7 all d! permutations are enumerated and
+    the per-subset costs are memoised, so only ~2^d cost evaluations are needed.
+
+    This is a Monte-Carlo estimate (controlled by n_outer/n_inner/n_var) on the same
+    illustrative model and ranges as :func:`sobol_indices`; it is a methods
+    demonstration, not a calibrated attribution. The double-loop estimator is known
+    to carry a small-sample bias at tiny n_inner; raise n_outer/n_inner to converge.
+
+    Returns
+    -------
+    dict: 'names' (list), 'shapley' (ndarray d, sums ~1), 'var_total' (float).
+    """
+    if names is None and bounds is None:
+        names, bounds = _default_bounds()
+    elif names is None:
+        names = [f"x{i}" for i in range(len(bounds))]
+    elif bounds is None:
+        _, bounds = _default_bounds(names)
+    if model_fn is None:
+        model_fn = lambda v: default_model_fn(v, names=names)  # noqa: E731
+
+    d = len(names)
+    rng = np.random.default_rng(seed)
+    Xv = _scale_sample(rng.random((n_var, d)), bounds)
+    yv = np.array([model_fn(r) for r in Xv])
+    var_total = float(np.var(yv, ddof=1))
+    if var_total <= 0.0:
+        return {"names": list(names), "shapley": np.full(d, np.nan),
+                "var_total": var_total}
+
+    c = _closed_effect_cache(model_fn, bounds, d, n_outer, n_inner, var_total, rng)
+    if n_perms is None and d <= 7:
+        perms = list(itertools.permutations(range(d)))
+    else:
+        perms = [tuple(rng.permutation(d)) for _ in range(n_perms or 1000)]
+
+    sh = np.zeros(d)
+    for perm in perms:
+        prev = set()
+        c_prev = 0.0
+        for i in perm:
+            nxt = prev | {i}
+            c_next = c(nxt)
+            sh[i] += c_next - c_prev
+            prev, c_prev = nxt, c_next
+    sh /= len(perms)
+    return {"names": list(names), "shapley": sh, "var_total": var_total}
 
 
 # --- Jensen-bias aggregation -------------------------------------------------
@@ -262,14 +381,14 @@ def jensen_bias(co2_array=None, n_lat=91, models=None, rng=None):
     }
 
 
-def summarise(sobol=None, jb=None):
-    """One-line diagnostic bundle for the two illustrative analyses."""
+def summarise(sobol=None, jb=None, shap=None):
+    """One-line diagnostic bundle for the illustrative analyses."""
     if sobol is None:
         sobol = sobol_indices(n_base=128)
     if jb is None:
         jb = jensen_bias()
     order = np.argsort(sobol["ST"])[::-1]
-    return {
+    out = {
         "sobol_names": [sobol["names"][i] for i in order],
         "sobol_S1": sobol["S1"][order],
         "sobol_ST": sobol["ST"][order],
@@ -277,3 +396,9 @@ def summarise(sobol=None, jb=None):
         "jensen_delta_J_range": (float(np.min(jb["delta_J"])),
                                  float(np.max(jb["delta_J"]))),
     }
+    if shap is not None:
+        os_ = np.argsort(shap["shapley"])[::-1]
+        out["shapley_names"] = [shap["names"][i] for i in os_]
+        out["shapley"] = shap["shapley"][os_]
+        out["shapley_sum"] = float(np.nansum(shap["shapley"]))
+    return out

@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "eh-habitability: illustrative multi-sphere Earth-habitability framework (eh_shallow + eh_deeptime)"
+abstract: >-
+  Reduced, transparent reference implementations accompanying the Perspective
+  "A multi-sphere perspective on Earth habitability across deep time and the
+  Anthropocene". eh_shallow is an Anthropocene Composite-Hazard-Score / Habitable-
+  Area-Fraction emulator driven by real observational data; eh_deeptime is an
+  illustrative deep-time scaffold (closed carbon-sulfur-oxygen box model, 1-D
+  energy-balance climate, guild-mixture habitability metric, tempered-SMC twin
+  recovery, Sobol + Shapley sensitivity, a published-model structural benchmark,
+  and a literature-anchored subsurface-biosphere carbon box). These are
+  illustrations / methods demonstrations, NOT calibrated or validated
+  reconstructions; no fabricated data are used.
+type: software
+authors:
+  - family-names: Rostami
+    given-names: Masoud
+  - family-names: Fallah
+    given-names: Bijan
+  - family-names: Fu
+    given-names: Li-Yun
+license: MIT
+repository-code: "https://github.com/bijanf/eh-habitability"
+keywords:
+  - Earth habitability
+  - habitable area fraction
+  - carbon-sulfur cycle
+  - extremophiles
+  - deep time
+  - Anthropocene
+version: "0.3.0"

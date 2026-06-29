@@ -24,7 +24,8 @@ import os
 
 import numpy as np
 
-from . import carbon_sulfur, ebm, habitability, smc, sensitivity, haf, plots
+from . import (carbon_sulfur, ebm, habitability, smc, sensitivity, haf, plots,
+               benchmark, subsurface)
 
 
 def _carbon_sulfur_fig(out):
@@ -85,20 +86,60 @@ def _smc_fig(out, quick=False):
 
 
 def _sensitivity_fig(out, quick=False):
-    sob = sensitivity.sobol_indices(n_base=(32 if quick else 64))
+    # fast peak-warming model_fn (short integration), shared by Sobol AND Shapley so
+    # the two are mutually consistent; peak warming is reached well within 60 kyr.
+    names, bounds = sensitivity._default_bounds()
+
+    def fast_pw(v):
+        ov = {n: float(x) for n, x in zip(names, v)}
+        r = carbon_sulfur.run_csys(params=ov, m_inj=sensitivity.SOBOL_PULSE_GTC,
+                                   t_dur=sensitivity.SOBOL_PULSE_DUR,
+                                   t_end=60.0, n_out=61)
+        return float(carbon_sulfur.summarise(r)["peak_warming_K"])
+
+    sob = sensitivity.sobol_indices(model_fn=fast_pw, bounds=bounds, names=names,
+                                    n_base=(32 if quick else 128),
+                                    n_boot=(0 if quick else 400))
     jb = sensitivity.jensen_bias()
-    plots.plot_sensitivity(sob, jb, os.path.join(out, "sensitivity.pdf"))
+    shap = None
+    if not quick:   # Shapley is the heavier (double-loop) estimator
+        shap = sensitivity.shapley_effects(model_fn=fast_pw, bounds=bounds,
+                                           names=names, n_outer=32, n_inner=4, n_var=256)
+    plots.plot_sensitivity(sob, jb, os.path.join(out, "sensitivity.pdf"), shap=shap)
     order = np.argsort(sob["ST"])[::-1]
-    return {"sobol_names": [sob["names"][i] for i in order],
-            "sobol_ST": [float(sob["ST"][i]) for i in order],
-            "sobol_S1": [float(sob["S1"][i]) for i in order],
-            "jensen_sigma_agg": float(jb["sigma_agg"])}
+    m = {"sobol_names": [sob["names"][i] for i in order],
+         "sobol_ST": [float(sob["ST"][i]) for i in order],
+         "sobol_S1": [float(sob["S1"][i]) for i in order],
+         "jensen_sigma_agg": float(jb["sigma_agg"])}
+    if shap is not None:
+        os_ = np.argsort(shap["shapley"])[::-1]
+        m["shapley_names"] = [shap["names"][i] for i in os_]
+        m["shapley"] = [float(shap["shapley"][i]) for i in os_]
+        m["shapley_sum"] = float(np.nansum(shap["shapley"]))
+    return m
 
 
 def _haf_fig(out):
     res = haf.coupled_event_haf()
     plots.plot_coupled_haf(res, os.path.join(out, "coupled_haf.pdf"))
     return haf.summarise(res)
+
+
+def _benchmark_fig(out):
+    """Structural-uncertainty benchmark: our box model vs published community
+    models + the proxy consensus (model-vs-model indicator, not validation)."""
+    comp = benchmark.structural_comparison()
+    plots.plot_structural_benchmark(comp, os.path.join(out, "structural_benchmark.pdf"))
+    return benchmark.summarise(comp)
+
+
+def _subsurface_fig(out):
+    """Subsurface-biosphere carbon box (H3): anchored present-day stock + the
+    mechanistic shrinkage of the habitable depth window under surface warming."""
+    resp = subsurface.warming_response()
+    h3 = subsurface.h3_consistency()
+    plots.plot_subsurface(resp, h3, os.path.join(out, "subsurface_h3.pdf"))
+    return h3
 
 
 def _deeptime_combined_fig(out):
@@ -145,6 +186,10 @@ def main():
     metrics["sensitivity"] = _sensitivity_fig(args.out, quick=args.quick)
     print("[framework] coupled HAF(t) through a carbon pulse ...")
     metrics["coupled_haf"] = _haf_fig(args.out)
+    print("[framework] structural benchmark vs published models ...")
+    metrics["structural_benchmark"] = _benchmark_fig(args.out)
+    print("[framework] subsurface-biosphere carbon box (H3) ...")
+    metrics["subsurface_h3"] = _subsurface_fig(args.out)
     print("[framework] combined deep-time figure (closed C-S-O + HAF) ...")
     metrics["deeptime_combined"] = _deeptime_combined_fig(args.out)
 

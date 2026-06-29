@@ -18,7 +18,16 @@ habitability  guild-mixture Bayesian-logistic habitability metric, fit to SYNTHE
 smc           tempered-SMC identical-twin parameter recovery (a sampler
               self-consistency demonstration on synthetic pseudo-data -- NOT
               calibration to proxies, NOT validation).
-sensitivity   Saltelli/Sobol variance-based sensitivity + Jensen-bias aggregation.
+sensitivity   Saltelli/Sobol (with bootstrap CIs) + Shapley effects + Jensen-bias.
+benchmark     structural-uncertainty benchmark: our box model vs PUBLISHED LOSCAR/
+              cGENIE/iLOSCAR PETM diagnostics + the proxy consensus (cited; an
+              inter-model indicator, NOT validation).
+subsurface    deep subsurface-biosphere carbon box (H3) anchored to Magnabosco
+              (2018, 23-31 Pg C); mechanistic shrinkage under surface warming.
+deeptime_data REAL public deep-time data ingestion (Macrostrat lithology live;
+              Foster/PINT/PhanGrids catalogued w/ DOIs) + no-fabrication guard.
+extremophiles BacDive (DSMZ) per-strain cardinal-limit ingestion (credential-gated)
+              + guild cardinal-range aggregator -- a real-data niche backbone.
 haf           deep-time Habitable Area Fraction HAF(t) through a carbon-release
               event, driven ENTIRELY by the carbon_sulfur box model's own pCO2(t)
               and ocean pH(t) (carbon -> climate -> ocean chemistry ->
@@ -40,6 +49,7 @@ from __future__ import annotations
 
 __all__ = [
     "petm", "carbon_sulfur", "ebm", "habitability",
-    "smc", "sensitivity", "haf", "plots", "framework",
+    "smc", "sensitivity", "benchmark", "subsurface", "haf",
+    "deeptime_data", "extremophiles", "plots", "framework",
 ]
 __version__ = "0.2.0"

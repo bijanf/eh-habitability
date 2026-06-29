@@ -141,6 +141,25 @@ def _irls(Phi, y, prior_sd, n_iter=100, tol=1e-8):
     return beta
 
 
+def _laplace_cov(Phi, beta, prior_sd):
+    """Laplace posterior covariance = inverse penalised Hessian at the MAP.
+
+    H = Phi' W Phi + Lam, with W = diag(p(1-p)) at the MAP and Lam the prior
+    precision; cov = H^{-1}. This is the standard Laplace (Gaussian) approximation
+    to the Bayesian logistic posterior -- the honest stand-in for full HMC, which is
+    unavailable here (no PyMC/Stan). Predictive uncertainty on P(growth) is
+    propagated from this covariance in :func:`p_hab_ci`.
+    """
+    lam = 1.0 / np.asarray(prior_sd) ** 2
+    p = _sigmoid(Phi @ beta)
+    w = np.clip(p * (1.0 - p), 1e-9, None)
+    H = Phi.T @ (Phi * w[:, None]) + np.diag(lam)
+    try:
+        return np.linalg.inv(H)
+    except np.linalg.LinAlgError:
+        return np.linalg.pinv(H)
+
+
 def make_synthetic_data(rng, n=4000):
     """Draw SYNTHETIC (X, y, guild_id) growth pseudo-data from the GUILDS boxes.
 
@@ -258,8 +277,9 @@ def _fit_guild(rng, guild_index, n=4000):
     X, yg = _guild_training_set(rng, guild_index, n)
     Phi, mu, sd, prior_sd = _design(X)
     beta = _irls(Phi, yg.astype(float), prior_sd)
-    return {"name": GUILD_NAMES[guild_index], "beta": beta, "mu": mu, "sd": sd,
-            "prior_sd": prior_sd, "n_train": int(n), "n_pos": int(yg.sum())}
+    cov = _laplace_cov(Phi, beta, prior_sd)   # Laplace posterior covariance
+    return {"name": GUILD_NAMES[guild_index], "beta": beta, "cov": cov, "mu": mu,
+            "sd": sd, "prior_sd": prior_sd, "n_train": int(n), "n_pos": int(yg.sum())}
 
 
 def fit_one(rng, guild_index, n=4000):
@@ -293,6 +313,29 @@ def p_hab_mixture(X, models):
     """
     ps = np.stack([p_hab(X, m) for m in models], axis=0)   # (n_guilds, n)
     return ps.max(axis=0)
+
+
+def p_hab_ci(X, model, n_sigma=1.64):
+    """Single-guild P(growth) with a Laplace-posterior credible interval.
+
+    Returns (central, lo, hi). The logit is approximately Gaussian with mean
+    Phi@beta and variance Phi cov Phi' (Laplace). The central value is the plug-in
+    prediction sigmoid(mu) -- identical to :func:`p_hab` -- and the band maps the
+    logit credible interval mu +- n_sigma*sd through the sigmoid (n_sigma=1.64 ->
+    ~90%), so it always nests: lo <= central <= hi. If the model has no Laplace
+    'cov' (older fit) the band collapses to the point. This is the honest predictive
+    uncertainty the previous MAP plug-in lacked, given no PyMC/Stan/HMC.
+    """
+    Phi, _, _, _ = _design_with(X, model["mu"], model["sd"])
+    mu_logit = Phi @ model["beta"]
+    central = _sigmoid(mu_logit)
+    if "cov" not in model:
+        return central, central, central
+    var = np.clip(np.einsum("ij,jk,ik->i", Phi, model["cov"], Phi), 0.0, None)
+    sd = np.sqrt(var)
+    return (central,
+            _sigmoid(mu_logit - n_sigma * sd),
+            _sigmoid(mu_logit + n_sigma * sd))
 
 
 # --- diagnostics --------------------------------------------------------------

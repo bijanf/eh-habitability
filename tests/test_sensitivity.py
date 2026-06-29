@@ -59,6 +59,32 @@ def test_sobol_default_model_runs():
     assert np.all(np.isfinite(res["S1"])) and np.all(np.isfinite(res["ST"]))
 
 
+def test_sobol_bootstrap_ci():
+    model, bounds, names = _toy_problem()
+    res = sensitivity.sobol_indices(model_fn=model, bounds=bounds, names=names,
+                                    n_base=256, seed=4, n_boot=200)
+    for k in ("S1_ci", "ST_ci"):
+        assert k in res and res[k].shape == (len(names), 2)
+        assert np.all(res[k][:, 1] >= res[k][:, 0])          # p95 >= p05
+    # the point estimate should sit inside (or essentially at) its CI
+    assert np.all(res["S1"] >= res["S1_ci"][:, 0] - 0.05)
+    assert np.all(res["S1"] <= res["S1_ci"][:, 1] + 0.05)
+
+
+def test_shapley_sums_to_one_and_ranks():
+    # additive model y = 3*x0 + 1*x1 + 0*x2 on the unit cube: no interactions, so
+    # Shapley effects ~ variance shares (~0.9, 0.1, 0.0) and MUST sum to 1.
+    names = ["x0", "x1", "x2"]
+    bounds = [(0.0, 1.0)] * 3
+    res = sensitivity.shapley_effects(model_fn=lambda v: 3.0 * v[0] + v[1],
+                                      bounds=bounds, names=names,
+                                      n_outer=120, n_inner=8, n_var=1024, seed=1)
+    sh = res["shapley"]
+    assert abs(float(np.nansum(sh)) - 1.0) < 1e-6      # exact partition of variance
+    assert sh[0] > sh[1] > sh[2]                        # correct ranking
+    assert sh[0] > 0.6 and sh[2] < 0.2                  # x0 dominant, x2 ~ negligible
+
+
 def test_jensen_bias_finite_and_shaped():
     jb = sensitivity.jensen_bias(n_lat=61)
     for k in ("co2", "f_hab_integrated", "p_hab_globalmean", "delta_J"):

@@ -54,6 +54,17 @@ def test_mixture_dominates_single_guild():
         assert np.all(mix >= single - 1e-9), "mixture must be >= each single-guild p"
 
 
+def test_laplace_ci_ordered_and_bounded():
+    rng = np.random.default_rng(0)
+    m = hab.fit_one(rng, 0)
+    assert "cov" in m and m["cov"].shape[0] == m["cov"].shape[1]
+    X = np.array([[80.0, 5.0, 0.95], [150.0, 13.0, 0.30]])  # in-niche, far-out
+    mean, lo, hi = hab.p_hab_ci(X, m)
+    assert np.all(lo <= mean + 1e-9) and np.all(mean <= hi + 1e-9)   # ordered
+    assert np.all((lo >= 0) & (hi <= 1) & (mean >= 0) & (mean <= 1))  # in [0,1]
+    assert mean[0] > mean[1]                                          # in-niche higher
+
+
 def test_cross_validation_metrics_sane():
     rng = np.random.default_rng(0)
     cv = hab.grouped_cross_validate(rng, k=5)
