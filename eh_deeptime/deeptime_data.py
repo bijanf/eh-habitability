@@ -13,7 +13,8 @@ LIVE sources (real downloads confirmed working 2026-06-29):
   - LR04 global benthic d18O stack (Lisiecki & Raymo 2005), via the NOAA NCEI mirror
     (PANGAEA blocks programmatic download). doi 10.1029/2004PA001071. -> load_lr04()
   - Macrostrat lithology definitions (macrostrat.org/api, CC-BY-4.0). Peters et al.
-    2018, GSA Today; doi 10.1130/GSATG377A.1. -> load_macrostrat_lithologies()
+    2018, Geochem. Geophys. Geosyst.; doi 10.1029/2018GC007467.
+    -> load_macrostrat_lithologies()
   - PINT(QPI) absolute palaeointensity database (Veikkolainen et al. 2017, Sci. Data;
     PINT v8 Bono et al. 2022 GJI). ~640 dipole-moment determinations 0-3458 Ma from a
     CC0 Zenodo/Dryad deposit (doi 10.5061/dryad.63g17), read with a tiny built-in .ods
@@ -82,10 +83,52 @@ def assert_real_data(context: str = "") -> None:
             + "\nRe-run with network access; no synthetic substitute is used.")
 
 
-def _download(url: str, fname: str, timeout: int = 60) -> str | None:
+def _looks_like_html(head: bytes) -> bool:
+    h = head[:512].lstrip().lower()
+    return (h.startswith(b"<!doctype html") or h.startswith(b"<html")
+            or b"<head>" in h or b"<body" in h)
+
+
+def _valid_content(path: str, expect: str | None) -> bool:
+    """Cheap sniff that a cached/downloaded file is the EXPECTED type, not an
+    HTTP-200 error page / wrong schema. Guards against a poisoned cache being
+    served as a real download (no-fabrication: a wrong body must read as failure)."""
+    if expect is None:
+        return True
+    try:
+        with open(path, "rb") as f:
+            head = f.read(2048)
+    except Exception:
+        return False
+    if not head.strip():
+        return False
+    if expect == "zip":                         # zip / xlsx / ods all start PK\x03\x04
+        return head[:4] == b"PK\x03\x04"
+    if expect == "json":
+        return head.lstrip()[:1] in (b"{", b"[")
+    if expect in ("text", "csv", "tsv"):
+        return not _looks_like_html(head)
+    return True
+
+
+def _download(url: str, fname: str, timeout: int = 60,
+              expect: str | None = None) -> str | None:
+    """Download `url` to the cache and return its path, or None on any failure.
+
+    `expect` ('zip' | 'json' | 'csv' | 'text') sniffs the body so an HTTP-200 error
+    page or wrong-schema response is rejected (returns None -> caller records a
+    FAILED provenance) rather than cached and later mislabeled as a real download.
+    Writes atomically (temp + rename) so a partial/invalid body never poisons the
+    cache; a cache hit is re-validated against `expect` before being trusted.
+    """
     path = os.path.join(_CACHE, fname)
     if os.path.exists(path) and os.path.getsize(path) > 0:
-        return path
+        if _valid_content(path, expect):
+            return path
+        try:                                    # drop a previously-poisoned cache file
+            os.remove(path)
+        except OSError:
+            pass
     try:
         req = urllib.request.Request(
             url, headers={"User-Agent": "eh_deeptime/0.3 (research; contact corresponding author)"})
@@ -93,17 +136,27 @@ def _download(url: str, fname: str, timeout: int = 60) -> str | None:
             data = r.read()
         if not data:
             return None
-        with open(path, "wb") as f:
+        tmp = path + ".part"
+        with open(tmp, "wb") as f:
             f.write(data)
+        if not _valid_content(tmp, expect):     # reject error pages / wrong type
+            os.remove(tmp)
+            return None
+        os.replace(tmp, path)                    # atomic promote; no partial cache
         return path
     except Exception:
+        try:
+            if os.path.exists(path + ".part"):
+                os.remove(path + ".part")
+        except OSError:
+            pass
         return None
 
 
 def _download_zip_member(url: str, zip_fname: str, member: str,
                          timeout: int = 120) -> bytes | None:
     """Download a zip (cached) and return the raw bytes of one member, or None."""
-    path = _download(url, zip_fname, timeout=timeout)
+    path = _download(url, zip_fname, timeout=timeout, expect="zip")
     if path is None:
         return None
     try:
@@ -136,7 +189,6 @@ def _read_ods(ods_bytes: bytes, sheet_name: str) -> list[list]:
             continue
         rows: list[list] = []
         for r in tbl.iter(f"{{{_ODS_T}}}table-row"):
-            rrep = min(int(r.get(f"{{{_ODS_T}}}number-rows-repeated", "1")), 5)
             cells: list = []
             for c in list(r):
                 if c.tag.split("}")[-1] not in ("table-cell", "covered-table-cell"):
@@ -146,8 +198,11 @@ def _read_ods(ods_bytes: bytes, sheet_name: str) -> list[list]:
                 if val is None:
                     val = "".join(t for t in c.itertext())
                 cells.extend([val] * crep)
+            # Keep each value-bearing row exactly once. number-rows-repeated is only
+            # ever expanded for BLANK rows (which we drop anyway), so a genuine data
+            # row is never duplicated -- avoids silently inflating measurement counts.
             if any(str(x).strip() for x in cells):
-                rows.extend([cells] * rrep)
+                rows.append(cells)
         return rows
     return []
 
@@ -167,20 +222,26 @@ def load_macrostrat_lithologies() -> dict:
     """Return the real Macrostrat lithology dictionary (CC-BY-4.0).
 
     {'lithologies': [ {lith_id, name, type, group, class, ...}, ... ],
-     'source': '...', 'doi': '10.1130/GSATG377A.1', 'license': 'CC-BY-4.0'}.
+     'source': '...', 'doi': '10.1029/2018GC007467', 'license': 'CC-BY-4.0'}.
     Refuses (records a failure) rather than fabricate if the API is unreachable.
     """
-    path = _download(MACROSTRAT_LITH_URL, "macrostrat_lithologies.json")
+    path = _download(MACROSTRAT_LITH_URL, "macrostrat_lithologies.json", expect="json")
     if path is None:
         return {"lithologies": [], "source": _record("Macrostrat lithologies FAILED")}
-    with open(path) as fh:
-        d = json.load(fh)
-    liths = d.get("success", {}).get("data", [])
+    try:
+        with open(path) as fh:
+            d = json.load(fh)
+        liths = d.get("success", {}).get("data", [])
+    except (ValueError, OSError):
+        liths = []
+    if not liths:
+        return {"lithologies": [], "n": 0,
+                "source": _record("Macrostrat lithologies EMPTY/parse FAILED")}
     return {
         "lithologies": liths,
         "n": len(liths),
         "source": "Macrostrat lithology definitions (macrostrat.org/api, downloaded)",
-        "doi": "10.1130/GSATG377A.1",
+        "doi": "10.1029/2018GC007467",
         "license": d.get("success", {}).get("license", "CC-BY 4.0"),
     }
 
@@ -204,10 +265,13 @@ def load_foster2017_co2() -> dict:
     alkenones, ...). Real measurements; refuses (records a failure) if unreachable.
     """
     import pandas as pd
-    path = _download(FOSTER2017_XLSX, "foster2017_co2.xlsx", timeout=120)
+    path = _download(FOSTER2017_XLSX, "foster2017_co2.xlsx", timeout=120, expect="zip")
     if path is None:
         return {"rows": [], "n": 0, "source": _record("Foster 2017 CO2 FAILED")}
-    df = pd.read_excel(path, sheet_name="proxies", header=None)
+    try:
+        df = pd.read_excel(path, sheet_name="proxies", header=None)
+    except Exception:
+        return {"rows": [], "n": 0, "source": _record("Foster 2017 CO2 parse FAILED")}
 
     def _num(x):
         try:
@@ -230,6 +294,8 @@ def load_foster2017_co2() -> dict:
                 rows.append({"proxy_family": fam, "age_Ma": age, "co2_ppm": co2,
                              "co2_lo": _num(df.iloc[i, b + 7]),
                              "co2_hi": _num(df.iloc[i, b + 8])})
+    if not rows:                                # parsed but no proxies -> refuse
+        return {"rows": [], "n": 0, "source": _record("Foster 2017 CO2 EMPTY FAILED")}
     return {
         "rows": rows, "n": len(rows), "var": "CO2", "kind": "measurement",
         "source": "Foster, Royer & Lunt 2017 CO2 compilation (Springer SI, downloaded)",
@@ -246,7 +312,7 @@ def load_lr04() -> dict:
     rather than fabricate if the NOAA file is unreachable.
     """
     import re
-    path = _download(LR04_URL, "lr04_lisiecki2005.txt")
+    path = _download(LR04_URL, "lr04_lisiecki2005.txt", expect="text")
     if path is None:
         return {"rows": [], "n": 0, "source": _record("LR04 FAILED")}
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -256,6 +322,8 @@ def load_lr04() -> dict:
         if re.match(r"^\s*\d+(\.\d+)?\s+[\-\d.]+\s+[\-\d.]+\s*$", ln):
             a, d, e = ln.split()
             data.append({"age_kyr": float(a), "d18O": float(d), "error": float(e)})
+    if not data:                                # parsed but no rows -> refuse
+        return {"rows": [], "n": 0, "source": _record("LR04 EMPTY FAILED")}
     return {
         "rows": data, "n": len(data), "var": "d18O", "kind": "measurement",
         "source": "LR04 benthic d18O stack (Lisiecki & Raymo 2005, NOAA, downloaded)",
@@ -296,6 +364,8 @@ def load_pint() -> dict:
     iAGE, iDAGE, iVDM, iQPI = col("AGE"), col("DAGE"), col("VDM/VADM"), col("QPI")
     iID, iLAT, iLON = col("IDENT"), col("SLAT"), col("SLONG")
     iCONT, iCTRY, iGRP, iTYPE = col("Continent"), col("Country"), col("GROUP"), col("TYPE")
+    if iAGE is None or iVDM is None:        # wrong sheet/schema -> refuse, don't emit []
+        return {"rows": [], "n": 0, "source": _record("PINT(QPI) schema FAILED")}
 
     def get(r, i):
         return r[i] if (i is not None and i < len(r)) else None
@@ -317,6 +387,8 @@ def load_pint() -> dict:
             "continent": txt(r, iCONT), "country": txt(r, iCTRY),
             "group": txt(r, iGRP), "rock_type": txt(r, iTYPE),
         })
+    if not rows:                            # parsed but no real determinations -> refuse
+        return {"rows": [], "n": 0, "source": _record("PINT(QPI) EMPTY FAILED")}
     return {
         "rows": rows, "n": len(rows), "var": "geomag_dipole_moment",
         "kind": "measurement", "units": "VDM/VADM in 1e22 A m^2",
@@ -357,13 +429,18 @@ def load_pbdb_paleocoords(base_name: str = "Trilobita", limit: int = 5000,
     url = (f"{PBDB_COLLS}?base_name={urllib.parse.quote(base_name)}"
            f"&show=paleoloc&limit={int(limit)}")
     fname = f"pbdb_{base_name.lower().replace(' ', '_')}_{int(limit)}.csv"
-    path = _download(url, fname, timeout=timeout)
+    path = _download(url, fname, timeout=timeout, expect="csv")
     if path is None:
         return {"rows": [], "n": 0,
                 "source": _record(f"PBDB paleocoords ({base_name}) FAILED")}
     rows = []
     with open(path, encoding="utf-8", errors="replace") as fh:
-        for d in csv.DictReader(fh):
+        rd = csv.DictReader(fh)
+        cols = set(rd.fieldnames or [])
+        if not {"paleolat", "paleolng"} <= cols:    # wrong schema -> refuse, don't emit []
+            return {"rows": [], "n": 0,
+                    "source": _record(f"PBDB paleocoords ({base_name}) schema FAILED")}
+        for d in rd:
             plat, plng = _num(d.get("paleolat")), _num(d.get("paleolng"))
             if plat is None or plng is None:
                 continue
@@ -373,6 +450,9 @@ def load_pbdb_paleocoords(base_name: str = "Trilobita", limit: int = 5000,
                          "paleolat": plat, "paleolng": plng,
                          "modern_lat": _num(d.get("lat")), "modern_lng": _num(d.get("lng")),
                          "plate": d.get("geoplate")})
+    if not rows:                                     # parsed but no usable coords -> refuse
+        return {"rows": [], "n": 0,
+                "source": _record(f"PBDB paleocoords ({base_name}) EMPTY FAILED")}
     ages = [x["age_Ma"] for x in rows if x["age_Ma"] is not None]
     return {
         "rows": rows, "n": len(rows), "var": "paleogeography",
@@ -403,7 +483,7 @@ def proxy_sources() -> list[dict]:
          "kind": "measurement", "doi": LR04_DOI, "live": True, "loader": "load_lr04",
          "note": "0-5320 ka Plio-Pleistocene benthic d18O (NOAA mirror)"},
         {"name": "Macrostrat lithology", "var": "lithology", "kind": "measurement",
-         "doi": "10.1130/GSATG377A.1", "live": True,
+         "doi": "10.1029/2018GC007467", "live": True,
          "loader": "load_macrostrat_lithologies", "note": "CC-BY-4.0; N-America biased"},
         {"name": "PINT(QPI) absolute palaeointensity", "var": "geomag_dipole_moment",
          "kind": "measurement", "doi": PINT_DATA_DOI, "live": True, "loader": "load_pint",
@@ -420,7 +500,7 @@ def proxy_sources() -> list[dict]:
          "note": "derived H3 land/sea + paleolat grids, 5 plate models; the deposit is "
                  "3.4 GB / R-serialized -- impractical in-sandbox, so use load_pbdb_paleocoords"},
         {"name": "GEOCARBSULF (Berner 2006)", "var": "CO2_model",
-         "kind": "model_synthesis", "doi": "10.2475/ajs.291.4.339", "live": False,
+         "kind": "model_synthesis", "doi": "10.1016/j.gca.2005.11.032", "live": False,
          "note": "MODEL output -- never plot as a measurement"},
     ]
 

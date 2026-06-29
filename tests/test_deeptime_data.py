@@ -115,6 +115,73 @@ def test_proxy_db_assembles_real_series():
     dd.reset_provenance()
 
 
+def test_valid_content_rejects_error_pages(tmpdir=None):
+    import tempfile
+    d = tempfile.mkdtemp()
+    def w(name, b):
+        p = os.path.join(d, name)
+        with open(p, "wb") as fh:
+            fh.write(b)
+        return p
+    html = w("e.html", b"<!DOCTYPE html><html><head><title>503</title></head></html>")
+    assert not dd._valid_content(html, "csv")          # error page is NOT valid csv/text
+    assert not dd._valid_content(html, "json")
+    assert not dd._valid_content(html, "zip")
+    assert dd._valid_content(w("ok.json", b'{"success": {}}'), "json")
+    assert dd._valid_content(w("ok.csv", b'"a","b"\n1,2\n'), "csv")
+    assert dd._valid_content(w("ok.zip", b"PK\x03\x04rest"), "zip")
+    assert not dd._valid_content(w("notzip.bin", b"not a zip"), "zip")
+
+
+def test_guard_refuses_successful_but_wrong_schema():
+    # A download that succeeds (HTTP 200) but returns the WRONG schema must be
+    # recorded as a FAILURE, never returned as empty-but-"downloaded" real data.
+    import tempfile
+    d = tempfile.mkdtemp()
+    bad = os.path.join(d, "bad.csv")
+    with open(bad, "w") as fh:
+        fh.write("collection_no,lng,lat\n1,2,3\n")     # no paleolat/paleolng columns
+    orig = dd._download
+    try:
+        dd._download = lambda *a, **k: bad
+        dd.reset_provenance()
+        pg = dd.load_pbdb_paleocoords(base_name="Trilobita", limit=10)
+        assert pg["rows"] == [] and pg["n"] == 0
+        assert dd.fallbacks_used(), "wrong-schema 200 must be recorded as a failure"
+        raised = False
+        try:
+            dd.assert_real_data("t")
+        except RuntimeError:
+            raised = True
+        assert raised, "guard must refuse, not pass a mislabeled empty success"
+    finally:
+        dd._download = orig
+        dd.reset_provenance()
+
+
+def test_read_ods_does_not_duplicate_value_rows():
+    # number-rows-repeated on a value-bearing row must NOT inflate the data.
+    row = ('<table:table-row table:number-rows-repeated="4">'
+           '<table:table-cell office:value-type="float" office:value="100">'
+           '<text:p>100</text:p></table:table-cell></table:table-row>')
+    content = ('<?xml version="1.0"?>'
+               '<office:document-content '
+               'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+               'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+               'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+               '<office:body><office:spreadsheet>'
+               '<table:table table:name="S">' + row + '</table:table>'
+               '</office:spreadsheet></office:body></office:document-content>')
+    import io as _io
+    import zipfile as _zip
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, "w") as z:
+        z.writestr("content.xml", content)
+    grid = dd._read_ods(buf.getvalue(), "S")
+    assert len(grid) == 1, "a single value-bearing row must appear once, not 4x"
+    assert grid[0][0] == "100"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
