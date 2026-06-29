@@ -25,7 +25,7 @@ import os
 import numpy as np
 
 from . import (carbon_sulfur, ebm, habitability, smc, sensitivity, haf, plots,
-               benchmark, subsurface)
+               benchmark, subsurface, deeptime_data)
 
 
 def _carbon_sulfur_fig(out):
@@ -125,6 +125,21 @@ def _haf_fig(out):
     return haf.summarise(res)
 
 
+def _proxy_co2_fig(out):
+    """REAL Phanerozoic CO2 proxy compilation (Foster 2017), fetched live. Network-
+    graceful: if the download fails (offline) the figure is skipped, never faked."""
+    deeptime_data.reset_provenance()
+    co2 = deeptime_data.load_foster2017_co2()
+    if not co2["rows"]:
+        print("    [skip] Foster 2017 CO2 unavailable (offline); no figure (not faked)")
+        return {"status": "unavailable_offline", "n": 0}
+    plots.plot_proxy_co2(co2, os.path.join(out, "proxy_co2_foster2017.pdf"))
+    import collections
+    fam = collections.Counter(r["proxy_family"] for r in co2["rows"])
+    return {"n": co2["n"], "coverage_Ma": co2["coverage_Ma"], "doi": co2["doi"],
+            "by_family": dict(fam), "source": co2["source"]}
+
+
 def _benchmark_fig(out):
     """Structural-uncertainty benchmark: our box model vs published community
     models + the proxy consensus (model-vs-model indicator, not validation)."""
@@ -190,6 +205,8 @@ def main():
     metrics["structural_benchmark"] = _benchmark_fig(args.out)
     print("[framework] subsurface-biosphere carbon box (H3) ...")
     metrics["subsurface_h3"] = _subsurface_fig(args.out)
+    print("[framework] REAL Phanerozoic CO2 proxies (Foster 2017, live) ...")
+    metrics["proxy_co2_foster2017"] = _proxy_co2_fig(args.out)
     print("[framework] combined deep-time figure (closed C-S-O + HAF) ...")
     metrics["deeptime_combined"] = _deeptime_combined_fig(args.out)
 

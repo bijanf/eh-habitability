@@ -262,6 +262,40 @@ def plot_coupled_haf(res, path, tmax=300.0):
     return path
 
 
+def plot_proxy_co2(co2, path):
+    """REAL Phanerozoic CO2 proxy compilation (Foster, Royer & Lunt 2017).
+
+    `co2` is a deeptime_data.load_foster2017_co2 output. Scatter of measured proxy
+    CO2 vs age, coloured by proxy family, with the reported low-high range as a
+    light band per point. This is the project's one figure built from REAL measured
+    deep-time data (cited; not model output).
+    """
+    rows = co2["rows"]
+    fams = sorted({r["proxy_family"] for r in rows}, key=lambda s: (s is None, s))
+    cmap = {f: plt.cm.tab10(i % 10) for i, f in enumerate(fams)}
+    fig, ax = plt.subplots(figsize=(TWO_COL, 78 * MM))
+    for f in fams:
+        pts = [r for r in rows if r["proxy_family"] == f]
+        a = np.array([r["age_Ma"] for r in pts])
+        c = np.array([r["co2_ppm"] for r in pts])
+        lo = np.array([r["co2_lo"] if r["co2_lo"] else np.nan for r in pts])
+        hi = np.array([r["co2_hi"] if r["co2_hi"] else np.nan for r in pts])
+        ax.vlines(a, lo, hi, color=cmap[f], alpha=0.18, lw=0.6)
+        ax.scatter(a, c, s=7, color=cmap[f], alpha=0.8, lw=0,
+                   label=f"{f} (n={len(pts)})")
+    ax.set_yscale("log")
+    ax.set_xlabel("Age (Ma)")
+    ax.set_ylabel("Atmospheric CO$_2$ (ppm)")
+    ax.set_title(f"Phanerozoic CO$_2$ proxies — Foster et al. 2017 (n={len(rows)}, REAL data)",
+                 loc="left", fontweight="bold")
+    ax.legend(fontsize=4.5, frameon=False, ncol=2, loc="upper right")
+    ax.invert_xaxis()      # present at right, deep past at left (geologic convention)
+    fig.tight_layout(pad=0.6)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def plot_subsurface(resp, h3, path):
     """Subsurface-biosphere carbon (H3): present-day anchor + warming response.
 
