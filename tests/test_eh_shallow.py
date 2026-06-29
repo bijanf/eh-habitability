@@ -49,6 +49,34 @@ def test_prior_sampling_shape():
     assert np.all(np.isfinite(emulator.log_prior(p)[p[:, 0] > 0]))
 
 
+def test_provenance_guard_blocks_synthetic_fallback():
+    """The data-provenance guard must refuse synthetic fallback data (offline-safe)."""
+    from eh_shallow import data
+    data.reset_provenance()
+    # a real/downloaded source is not a fallback -> guard passes (no raise)
+    assert data._record("HadCRUT5 (Met Office), downloaded")
+    assert not data.fallbacks_used()
+    data.assert_real_data(context="test")                 # must NOT raise
+    # a synthetic embedded fallback is detected and the guard refuses
+    data._record("EMBEDDED FALLBACK (no network)")
+    assert data.fallbacks_used()
+    try:
+        data.assert_real_data(context="test")
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised, "assert_real_data must refuse when a synthetic fallback was used"
+    # an analytic stand-in baseline passed via `extra` is also refused
+    data.reset_provenance()
+    try:
+        data.assert_real_data(extra=["analytic stand-in baseline (WHI raster absent)"])
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised, "assert_real_data must refuse an analytic stand-in baseline"
+    data.reset_provenance()
+
+
 def test_smc_small_runs():
     """Tiny SMC end-to-end (needs network for HadCRUT5); skip gracefully if down."""
     from eh_shallow import data, smc

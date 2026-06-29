@@ -94,6 +94,55 @@ def _download(url: str, fname: str, timeout: int = 60) -> str | None:
 
 
 # ----------------------------------------------------------------------------- #
+# Data-provenance guard: never let SYNTHETIC fallback data silently enter a figure.
+# Every loader tags its output with a `source` string; the embedded coarse tables
+# and "UNAVAILABLE" returns are fallbacks. Each fallback actually used this process
+# is registered here so a figure driver can refuse (or be explicitly forced) to
+# emit a publication artifact built on non-real data. See assert_real_data().
+# ----------------------------------------------------------------------------- #
+_PROVENANCE: list[str] = []   # synthetic-fallback source strings used this process
+
+
+def _is_fallback(source: str) -> bool:
+    s = (source or "").upper()
+    return "FALLBACK" in s or "UNAVAILABLE" in s
+
+
+def _record(source: str) -> str:
+    """Register a data source; return it unchanged so it can wrap a `source=`
+    assignment. Only fallback / unavailable sources are retained."""
+    if _is_fallback(source):
+        _PROVENANCE.append(source)
+    return source
+
+
+def fallbacks_used() -> list[str]:
+    """Distinct synthetic-fallback sources loaded so far this process."""
+    return sorted(set(_PROVENANCE))
+
+
+def reset_provenance() -> None:
+    _PROVENANCE.clear()
+
+
+def assert_real_data(context: str = "", extra: list[str] | None = None) -> None:
+    """Raise RuntimeError if any input loaded this process used a SYNTHETIC
+    fallback. `extra` adds non-loader provenance to the check (e.g. an analytic
+    stand-in baseline). Call this in any driver that writes a publication figure
+    so synthetic placeholder data can never enter one silently."""
+    bad = fallbacks_used() + [e for e in (extra or [])
+                              if _is_fallback(e) or "stand-in" in e.lower()]
+    if bad:
+        raise RuntimeError(
+            "Refusing to emit a publication artifact"
+            + (f" [{context}]" if context else "")
+            + " because these inputs used SYNTHETIC FALLBACK data, not real "
+              "downloads:\n  - " + "\n  - ".join(bad)
+            + "\nRe-run with network access (so the real datasets are fetched and "
+              "cached), or explicitly opt in to a clearly NON-PUBLICATION run.")
+
+
+# ----------------------------------------------------------------------------- #
 # Embedded fallbacks (coarse, used only if the network is down)
 # ----------------------------------------------------------------------------- #
 _HADCRUT5_FALLBACK = {  # decadal anomalies vs 1961-1990, approximate
@@ -161,7 +210,7 @@ def load_hadcrut5() -> pd.DataFrame:
     full = np.arange(1850, 2026)
     g = np.interp(full, yrs, vals)
     df = pd.DataFrame({"year": full, "gmst": g, "lo": g - 0.15, "hi": g + 0.15})
-    df.attrs["source"] = "EMBEDDED FALLBACK (no network)"
+    df.attrs["source"] = _record("EMBEDDED FALLBACK (no network)")
     return df
 
 
@@ -187,7 +236,7 @@ def load_gistemp() -> pd.DataFrame:
     vals = np.array([-0.16, -0.08, -0.15, 0.13, -0.03, 0.26, 0.61, 0.72, 1.02, 1.29])
     full = np.arange(1880, 2025)
     out = pd.DataFrame({"year": full, "gmst": np.interp(full, yrs, vals)})
-    out.attrs["source"] = "EMBEDDED FALLBACK (no network)"
+    out.attrs["source"] = _record("EMBEDDED FALLBACK (no network)")
     return out
 
 
@@ -220,7 +269,7 @@ def load_berkeley() -> pd.DataFrame:
     vals = np.array([-0.37, -0.20, -0.12, -0.20, 0.07, -0.02, 0.18, 0.52, 0.70, 1.02, 1.29])
     full = np.arange(1850, 2025)
     out = pd.DataFrame({"year": full, "gmst": np.interp(full, yrs, vals)})
-    out.attrs["source"] = "EMBEDDED FALLBACK (no network)"
+    out.attrs["source"] = _record("EMBEDDED FALLBACK (no network)")
     return out
 
 
@@ -246,7 +295,7 @@ def load_mat_climatology() -> dict:
     lon = np.arange(-177.5, 180, 5.0)
     zonal = 30.0 - 60.0 * (np.abs(lat) / 90.0) ** 1.25
     return {"lon": lon, "lat": lat, "mat": zonal[:, None] * np.ones((1, lon.size)),
-            "source": "EMBEDDED FALLBACK (no network)"}
+            "source": _record("EMBEDDED FALLBACK (no network)")}
 
 
 def load_gistemp_gridded() -> dict:
@@ -287,7 +336,7 @@ def load_gistemp_gridded() -> dict:
     g = (yrs - 1950) / 75.0 * 1.2
     ann = np.ma.array(g[:, None, None] * pat[None, :, None] * np.ones((1, 1, lon.size)))
     return {"lon": lon, "lat": lat, "years": yrs, "anom": ann,
-            "source": "EMBEDDED FALLBACK (no network)"}
+            "source": _record("EMBEDDED FALLBACK (no network)")}
 
 
 def load_gdhy_yields(crops=GDHY_CROPS, grid_lon=None, grid_lat=None) -> dict:
@@ -312,7 +361,7 @@ def load_gdhy_yields(crops=GDHY_CROPS, grid_lon=None, grid_lat=None) -> dict:
         except Exception:
             pass
     if not os.path.isdir(os.path.join(ddir, "maize")):
-        return {"years": np.array([]), "source": "GDHY UNAVAILABLE (no network)",
+        return {"years": np.array([]), "source": _record("GDHY UNAVAILABLE (no network)"),
                 **{c: None for c in crops}}
 
     import netCDF4 as ncmod
@@ -364,7 +413,7 @@ def load_ar6_erf() -> pd.DataFrame:
     full = np.arange(1750, 2020)
     df = pd.DataFrame({"year": full, "total": np.interp(full, yrs, vals)})
     df["co2"] = 0.7 * df["total"]
-    df.attrs["source"] = "EMBEDDED FALLBACK (no network)"
+    df.attrs["source"] = _record("EMBEDDED FALLBACK (no network)")
     return df
 
 
@@ -397,7 +446,7 @@ def load_ohc() -> pd.DataFrame:
     full = np.arange(2005, 2026)
     out = pd.DataFrame({"year": full, "ohc": np.interp(full, yrs, vals),
                         "sigma": np.full(full.shape, 5.0)})
-    out.attrs["source"] = "EMBEDDED FALLBACK (no network)"
+    out.attrs["source"] = _record("EMBEDDED FALLBACK (no network)")
     return out
 
 

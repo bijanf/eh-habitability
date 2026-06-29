@@ -30,6 +30,10 @@ def main(argv=None):
                     help="weight vectors drawn over the simplex for the weight-ensemble HAF")
     ap.add_argument("--baseline", default="auto", choices=["auto", "whi", "standin"],
                     help="tier-(ii) field: real WHI if available (auto/whi) or analytic stand-in")
+    ap.add_argument("--allow-synthetic-fallback", action="store_true",
+                    help="permit figures built on synthetic fallback data (offline / "
+                         "stand-in baseline). OFF by default: the run REFUSES rather than "
+                         "silently emit a non-real publication figure. Output is NOT for publication.")
     args = ap.parse_args(argv)
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -108,6 +112,22 @@ def main(argv=None):
     sT_eq, U_eq = chs.tier_series(out_mean, scales=scales)  # weights=None -> equal
     haf_equal = chs.haf_ensemble(sT_eq[None, :], U_eq[None, :], proj_years, 90)[0]
 
+    # Provenance guard: never emit publication figures from synthetic fallback data.
+    # By the time we get here HadCRUT5 / AR6 ERF / OHC have been loaded (directly and
+    # via the SMC); the baseline source is known. Refuse by default if any is synthetic.
+    extra_prov = []
+    if "stand-in" in baseline_src:
+        extra_prov.append(f"analytic stand-in baseline ({baseline_src}; WHI raster absent)")
+    synthetic = data.fallbacks_used() + extra_prov
+    if synthetic and not args.allow_synthetic_fallback:
+        data.assert_real_data(context="eh_shallow figures", extra=extra_prov)
+    elif synthetic:
+        bar = "!" * 72
+        print(f"\n{bar}\nWARNING: SYNTHETIC FALLBACK DATA IN USE -- OUTPUT IS NOT FOR PUBLICATION:")
+        for b in synthetic:
+            print(f"  - {b}")
+        print(f"{bar}\n")
+
     print("[4/5] figures")
     obs = data.load_hadcrut5()
     oy = obs["year"].to_numpy()
@@ -169,6 +189,10 @@ def main(argv=None):
             "gmst": data.load_hadcrut5().attrs.get("source"),
             "forcing": data.load_ar6_erf().attrs.get("source"),
             "ohc": data.load_ohc().attrs.get("source"),
+        },
+        "data_provenance": {
+            "all_real": not synthetic,
+            "synthetic_fallback_used": synthetic,
         },
         "out_of_sample_1981_2020": {"gmst_rmse_K": rmse},
         "ohc_fit_2005_2020": {"ohc_rmse_ZJ": ohc_rmse},
