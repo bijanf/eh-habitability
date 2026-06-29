@@ -72,10 +72,41 @@ def test_lr04_live_or_graceful():
     dd.reset_provenance()
 
 
+def test_pint_live_or_graceful():
+    dd.reset_provenance()
+    p = dd.load_pint()
+    if p["rows"]:                                         # network available
+        assert p["n"] > 400                               # ~640 graded determinations
+        ages = [r["age_Ma"] for r in p["rows"]]
+        assert max(ages) > 2500                           # reaches the Archean
+        assert all(r["vdm_e22_Am2"] > 0 for r in p["rows"])
+        assert all(0 < r["vdm_e22_Am2"] < 100 for r in p["rows"])  # 1e22 A m^2 scale
+        assert p["doi"] == "10.5061/dryad.63g17"
+        assert not dd.fallbacks_used()
+    else:
+        assert dd.fallbacks_used()                        # recorded a failure, no stand-in
+    dd.reset_provenance()
+
+
+def test_pbdb_paleocoords_live_or_graceful():
+    dd.reset_provenance()
+    pg = dd.load_pbdb_paleocoords(base_name="Trilobita", limit=500)
+    if pg["rows"]:                                        # network available
+        assert pg["n"] > 50
+        assert all(-90.0 <= r["paleolat"] <= 90.0 for r in pg["rows"])
+        assert all(-180.0 <= r["paleolng"] <= 180.0 for r in pg["rows"])
+        assert "/" in pg["doi"]
+        assert not dd.fallbacks_used()
+    else:
+        assert dd.fallbacks_used()
+    dd.reset_provenance()
+
+
 def test_proxy_db_assembles_real_series():
     dd.reset_provenance()
     db = dd.proxy_db()
-    assert set(db["series"]) == {"co2_foster2017", "d18O_lr04", "lithology_macrostrat"}
+    assert set(db["series"]) == {"co2_foster2017", "d18O_lr04", "lithology_macrostrat",
+                                 "dipole_pint", "paleocoords_pbdb"}
     for p in db["provenance"]:
         assert "/" in (p["doi"] or "")                    # each carries a real DOI
     # if everything fetched, the guard passes; otherwise it must have recorded failures

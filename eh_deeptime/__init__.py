@@ -26,7 +26,9 @@ subsurface    deep subsurface-biosphere carbon box (H3) anchored to Magnabosco
               (2018, 23-31 Pg C); mechanistic shrinkage under surface warming.
 deeptime_data REAL public deep-time data ingestion -- LIVE: Foster 2017 CO2
               compilation (~1200 proxies, 0-423 Ma), LR04 benthic d18O, Macrostrat
-              lithology; + no-fabrication guard (refuses, never substitutes).
+              lithology, PINT(QPI) geomagnetic dipole moment (~640 dets 0-3458 Ma),
+              and PBDB GPlates palaeocoordinates; + no-fabrication guard (refuses,
+              never substitutes).
 extremophiles BacDive (DSMZ) per-strain cardinal-limit ingestion (credential-gated)
               + guild cardinal-range aggregator -- a real-data niche backbone.
 haf           deep-time Habitable Area Fraction HAF(t) through a carbon-release
