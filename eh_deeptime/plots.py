@@ -28,6 +28,7 @@ _OCEAN = "#1b7837"      # ocean chemistry (green)
 _O2 = "#762a83"         # oxygen (purple)
 _SULF = "#8c510a"       # sulfur (brown)
 _HAB = "#35978f"        # habitability / HAF (teal)
+_GEOMAG = "#3f007d"     # geomagnetic dipole (indigo)
 
 
 def _panel(ax, kyr, central, lo, hi, color, ylabel, title, target=None):
@@ -290,6 +291,92 @@ def plot_proxy_co2(co2, path):
                  loc="left", fontweight="bold")
     ax.legend(fontsize=4.5, frameon=False, ncol=2, loc="upper right")
     ax.invert_xaxis()      # present at right, deep past at left (geologic convention)
+    fig.tight_layout(pad=0.6)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+_EONS = [("Archean", 2500.0, 4000.0, "#f0ead6"),
+         ("Proterozoic", 541.0, 2500.0, "#eef3f7"),
+         ("Phanerozoic", 0.0, 541.0, "#f4eef4")]
+_PRESENT_VADM = 8.0     # present-day axial dipole moment ~8e22 A m^2 (reference only)
+
+
+def _shade_eons(ax, amax):
+    """Light alternating background bands + top labels for the geologic eons."""
+    for name, lo, hi, col in _EONS:
+        if lo > amax:
+            continue
+        ax.axvspan(lo, min(hi, amax), color=col, lw=0, zorder=0)
+        xc = (lo + min(hi, amax)) / 2.0
+        label = "Phan." if (name == "Phanerozoic" and amax > 1500) else name
+        ax.text(xc, 0.97, label, transform=ax.get_xaxis_transform(), ha="center",
+                va="top", fontsize=4.5, color="0.45", clip_on=True)
+
+
+def plot_pint_dipole(pint, path):
+    """REAL absolute palaeointensity through deep time — PINT(QPI) database.
+
+    `pint` is a deeptime_data.load_pint() output. (a) every measured determination
+    as virtual (axial) dipole moment VDM/VADM vs age, coloured by the QPI reliability
+    score; (b) a 200-Myr binned median (+IQR) of the RELIABLE (QPI>=3) subset -- a
+    descriptive summary of the real data, NOT a model. Geologic eons are shaded and
+    the present-day field (~8e22 A m^2) marked for reference. Measured data (cited),
+    never model output.
+    """
+    rows = pint["rows"]
+    age = np.array([r["age_Ma"] for r in rows])
+    vdm = np.array([r["vdm_e22_Am2"] for r in rows])
+    qpi = np.array([r["qpi"] if r["qpi"] is not None else np.nan for r in rows])
+    amax = float(np.nanmax(age)) * 1.02
+
+    fig, axs = plt.subplots(1, 2, figsize=(TWO_COL, 72 * MM))
+
+    # (a) every determination, coloured by QPI reliability
+    ax = axs[0]
+    _shade_eons(ax, amax)
+    ax.axhline(_PRESENT_VADM, color="0.5", lw=0.6, ls=":")
+    ax.text(amax, _PRESENT_VADM, " present-day ≈8", fontsize=4.5, color="0.4",
+            va="bottom", ha="left")
+    sc = ax.scatter(age, vdm, c=qpi, cmap="viridis", vmin=0, vmax=7, s=9,
+                    alpha=0.85, lw=0.2, edgecolor="0.3")
+    cb = fig.colorbar(sc, ax=ax, pad=0.015, fraction=0.045)
+    cb.set_label("QPI reliability (0–7)", fontsize=5.5)
+    cb.ax.tick_params(labelsize=5)
+    ax.set_xlim(amax, 0.0)                  # present at right, deep past at left
+    ax.set_ylim(bottom=0.0)
+    ax.set_xlabel("Age (Ma)")
+    ax.set_ylabel("Virtual (axial) dipole moment (10$^{22}$ A m$^2$)")
+    ax.set_title(f"a  Absolute palaeointensity — PINT(QPI) (n={len(rows)}, REAL data)",
+                 loc="left", fontweight="bold")
+
+    # (b) 200-Myr binned median + IQR of the reliable (QPI>=3) subset
+    ax = axs[1]
+    _shade_eons(ax, amax)
+    rel = (qpi >= 3) & np.isfinite(vdm)
+    edges = np.arange(0.0, amax + 200.0, 200.0)
+    ctr, med, q1, q3, ns = [], [], [], [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = rel & (age >= lo) & (age < hi)
+        if m.sum() >= 3:
+            ctr.append((lo + hi) / 2.0)
+            med.append(np.median(vdm[m])); q1.append(np.percentile(vdm[m], 25))
+            q3.append(np.percentile(vdm[m], 75)); ns.append(int(m.sum()))
+    ctr, med, q1, q3 = map(np.array, (ctr, med, q1, q3))
+    ax.scatter(age[rel], vdm[rel], s=5, color="0.7", alpha=0.5, lw=0,
+               label=f"QPI≥3 determinations (n={int(rel.sum())})")
+    ax.fill_between(ctr, q1, q3, color=_GEOMAG, alpha=0.18, lw=0, label="interquartile range")
+    ax.plot(ctr, med, color=_GEOMAG, lw=1.3, marker="o", ms=2.5,
+            label="200-Myr binned median")
+    ax.axhline(_PRESENT_VADM, color="0.5", lw=0.6, ls=":")
+    ax.set_xlim(amax, 0.0)
+    ax.set_ylim(bottom=0.0)
+    ax.set_xlabel("Age (Ma)")
+    ax.set_ylabel("Virtual (axial) dipole moment (10$^{22}$ A m$^2$)")
+    ax.set_title("b  Binned median of reliable (QPI≥3) data", loc="left", fontweight="bold")
+    ax.legend(fontsize=4.5, frameon=False, loc="lower left")
+
     fig.tight_layout(pad=0.6)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)

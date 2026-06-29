@@ -140,6 +140,23 @@ def _proxy_co2_fig(out):
             "by_family": dict(fam), "source": co2["source"]}
 
 
+def _pint_dipole_fig(out):
+    """REAL absolute palaeointensity (PINT(QPI) dipole moment), fetched live. Network-
+    graceful: if the download fails (offline) the figure is skipped, never faked."""
+    deeptime_data.reset_provenance()
+    pint = deeptime_data.load_pint()
+    if not pint["rows"]:
+        print("    [skip] PINT(QPI) unavailable (offline); no figure (not faked)")
+        return {"status": "unavailable_offline", "n": 0}
+    plots.plot_pint_dipole(pint, os.path.join(out, "pint_dipole.pdf"))
+    import collections
+    by_q = collections.Counter(int(r["qpi"]) for r in pint["rows"] if r["qpi"] is not None)
+    return {"n": pint["n"], "coverage_Ma": pint["coverage_Ma"], "doi": pint["doi"],
+            "vdm_range_e22": [min(r["vdm_e22_Am2"] for r in pint["rows"]),
+                              max(r["vdm_e22_Am2"] for r in pint["rows"])],
+            "by_qpi": dict(sorted(by_q.items())), "source": pint["source"]}
+
+
 def _benchmark_fig(out):
     """Structural-uncertainty benchmark: our box model vs published community
     models + the proxy consensus (model-vs-model indicator, not validation)."""
@@ -207,12 +224,16 @@ def main():
     metrics["subsurface_h3"] = _subsurface_fig(args.out)
     print("[framework] REAL Phanerozoic CO2 proxies (Foster 2017, live) ...")
     metrics["proxy_co2_foster2017"] = _proxy_co2_fig(args.out)
+    print("[framework] REAL geomagnetic dipole moment (PINT(QPI), live) ...")
+    metrics["pint_dipole"] = _pint_dipole_fig(args.out)
     print("[framework] combined deep-time figure (closed C-S-O + HAF) ...")
     metrics["deeptime_combined"] = _deeptime_combined_fig(args.out)
 
     with open(os.path.join(args.out, "framework_metrics.json"), "w") as fh:
         json.dump(metrics, fh, indent=2, default=float)
-    print(f"\nwrote 7 figures + framework_metrics.json to {args.out}")
+    import glob
+    n_pdf = len(glob.glob(os.path.join(args.out, "*.pdf")))
+    print(f"\nwrote {n_pdf} figures + framework_metrics.json to {args.out}")
     print(json.dumps(metrics, indent=2, default=float))
 
 
