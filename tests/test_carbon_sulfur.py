@@ -40,14 +40,14 @@ def test_total_carbon_conservation_control():
     r = cs.run_csys(m_inj=0.0, t_end=400.0)
     tot = r["dic"] + r["corg_cr"] + r["ccarb_cr"]
     rel = np.nanmax(np.abs(tot - tot[0])) / tot[0]
-    assert rel < 1e-4, f"carbon not conserved in control: {rel}"
+    assert rel < 1e-11, f"carbon not conserved in control: {rel}"
 
 
 def test_total_sulfur_conservation_control():
     r = cs.run_csys(m_inj=0.0, t_end=400.0)
     tot = r["s_pyr"] + r["s_sulf"] + r["so4"]
     rel = np.nanmax(np.abs(tot - tot[0])) / tot[0]
-    assert rel < 1e-4, f"sulfur not conserved in control: {rel}"
+    assert rel < 1e-12, f"sulfur not conserved in control: {rel}"
 
 
 def test_total_sulfur_conservation_under_pulse():
@@ -56,7 +56,7 @@ def test_total_sulfur_conservation_under_pulse():
     r = cs.run_csys(m_inj=4000.0, t_end=400.0)
     tot = r["s_pyr"] + r["s_sulf"] + r["so4"]
     rel = np.nanmax(np.abs(tot - tot[0])) / tot[0]
-    assert rel < 1e-4, f"sulfur not conserved under pulse: {rel}"
+    assert rel < 1e-12, f"sulfur not conserved under pulse: {rel}"
 
 
 def test_o2_stays_positive():

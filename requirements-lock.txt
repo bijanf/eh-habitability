@@ -1,5 +1,5 @@
 # Pinned environment for the frozen release (see PREREGISTRATION.md).
-# Captured 2026-06-29. Pure CPU; no JAX/PyMC/Stan are required by the current code.
+# Captured 2026-07-02. Pure CPU; no JAX/PyMC/Stan are required by the current code.
 # Core runtime (eh_deeptime + eh_shallow):
 numpy==2.4.2
 scipy==1.17.1
@@ -9,5 +9,16 @@ pandas==2.3.3
 netCDF4==1.7.4
 xarray==2026.2.0
 requests==2.32.5
+# Shallow-time WHI / Random-Forest baseline path (eh_shallow/whi.py) -- required
+# for the WHI-derived figures; previously omitted from the lockfile:
+scikit-learn==1.8.0
+rasterio==1.5.0
+# Result-affecting climate/chemistry backends (eh_shallow/emulator.py): FaIR
+# provides the exact matrix-exponential two-layer EBM solver (its trajectory feeds
+# the HAF), PyCO2SYS the carbonate system, regionmask the land mask. Pinned so the
+# reported HAF numbers are reproducible across installs:
+fair==2.2.4
+PyCO2SYS==1.8.3.4
+regionmask==0.13.0
 # Test:
 pytest>=8.0

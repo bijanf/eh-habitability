@@ -82,10 +82,11 @@ def main(argv=None):
     if args.baseline in ("auto", "whi"):
         try:
             from . import whi as _whi
-            if os.path.exists(_whi.WHI_PATH):
+            if _whi.has_whi():
                 B_whi, whi_cov, _ = _whi.load_whi_field(G)
                 grid.set_baseline(B_whi, G)
-                baseline_src = "real gridded WHI"
+                baseline_src = ("real gridded WHI" if os.path.exists(_whi.WHI_PATH)
+                                else "released gridded WHI field")
             elif args.baseline == "whi":
                 print("      [warn] WHI raster not found; using stand-in")
         except Exception as e:
@@ -162,6 +163,13 @@ def main(argv=None):
     gm_mean = data.rebaseline(proj_years, out_mean["gmst"])
     pred = np.interp(oy[val], proj_years, gm_mean)
     rmse = float(np.sqrt(np.mean((pred - og[val]) ** 2)))
+    # baseline skill: persistence (hold the last calibration value) and a linear
+    # trend fit on 1850-1980, both scored over the withheld 1981-2020 window.
+    cal = (oy >= 1850) & (oy <= 1980)
+    last_cal = float(og[oy == 1980][0]) if np.any(oy == 1980) else float(og[cal][-1])
+    trend = np.polyval(np.polyfit(oy[cal], og[cal], 1), oy)
+    rmse_pers = float(np.sqrt(np.mean((last_cal - og[val]) ** 2)))
+    rmse_trend = float(np.sqrt(np.mean((trend[val] - og[val]) ** 2)))
     # OHC fit (2005-2020) of the posterior-mean run, on the 2005-2014 baseline
     ohc_rmse = None
     if post["obs_ohc"] is not None:
@@ -194,7 +202,13 @@ def main(argv=None):
             "all_real": not synthetic,
             "synthetic_fallback_used": synthetic,
         },
-        "out_of_sample_1981_2020": {"gmst_rmse_K": rmse},
+        "out_of_sample_1981_2020": {
+            "gmst_rmse_K": rmse,
+            "gmst_rmse_persistence_K": rmse_pers,
+            "gmst_rmse_linear_trend_K": rmse_trend,
+            "skill_vs_persistence": 1.0 - rmse / rmse_pers if rmse_pers else None,
+            "skill_vs_linear_trend": 1.0 - rmse / rmse_trend if rmse_trend else None,
+        },
         "ohc_fit_2005_2020": {"ohc_rmse_ZJ": ohc_rmse},
         "haf": {
             "preindustrial_1750_1800": float(np.mean(

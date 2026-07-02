@@ -32,6 +32,31 @@ WHI_PATH = os.environ.get(
 PRED_DIR = os.environ.get(
     "EH_WHI_PRED_DIR", "/home/bijanf/Documents/MR_gwasser_cluster_cache/Predictors_full")
 
+# Released, redistributable derivative: the WHI resampled to the 0.5-deg model grid
+# (raw values; ocean / no-data = NaN). This lets the WHI-dependent figures reproduce
+# without the raw raster, which is not distributed. Written by the release export.
+RELEASED_WHI = os.path.join(os.path.dirname(__file__), "released", "whi_field_0p5deg.npz")
+# Released permutation importances (so Fig. proto-weights(b) regenerates without the
+# raw predictor stack / raster).
+RELEASED_RF = os.path.join(os.path.dirname(__file__), "released", "whi_rf_importances.json")
+
+
+def has_whi():
+    """True if either the raw WHI raster or the released 0.5-deg field is available."""
+    return os.path.exists(WHI_PATH) or os.path.exists(RELEASED_WHI)
+
+
+def _raw_whi_on_grid(G):
+    """Raw WHI on the model grid: from the raster if present, else the released
+    0.5-deg field (redistributed with the code), else raise."""
+    if os.path.exists(WHI_PATH):
+        return _resample_to_grid(WHI_PATH, G)
+    if os.path.exists(RELEASED_WHI):
+        return np.load(RELEASED_WHI)["whi"].astype(float)
+    raise FileNotFoundError(
+        "No WHI available: set EH_WHI_PATH to the raster, or provide the released "
+        "field at " + RELEASED_WHI)
+
 # WHI's own constituents -> held out of the supervised fit to avoid circularity.
 # Net groundwater abstraction (nag) is the groundwater-stress numerator, so it is
 # a constituent and is excluded too, along with aridity, irrigation, river
@@ -71,7 +96,7 @@ def load_whi_field(G=None):
     are filled with the land median (neutral) so the HAF stays well defined.
     """
     G = G or grid.build()
-    whi = _resample_to_grid(WHI_PATH, G)
+    whi = _raw_whi_on_grid(G)
     land = G["land2d"]
     valid = land & np.isfinite(whi)
     cov = float(G["area2d"][valid].sum() / G["area2d"][land].sum())
@@ -117,7 +142,16 @@ def _fit_score(X, y, latf, seed):
 def rf_importances(seed=0):
     """Component-1 RF on the real 0.5 deg stack, reporting permutation importances
     of the INDEPENDENT predictors and the leakage (R2 with vs without the WHI's
-    own constituents), per the proposal's anti-circularity protocol."""
+    own constituents), per the proposal's anti-circularity protocol.
+
+    Released-artifact fallback: if the raw raster/predictor stack is unavailable,
+    return the released importances so Fig. proto-weights(b) still regenerates."""
+    if not (os.path.exists(WHI_PATH) and os.path.isdir(PRED_DIR)):
+        if os.path.exists(RELEASED_RF):
+            with open(RELEASED_RF) as f:
+                return json.load(f)["rf"]
+        raise FileNotFoundError(
+            "No WHI predictor stack and no released importances at " + RELEASED_RF)
     from sklearn.inspection import permutation_importance
     G = grid.build()
     latf_full = G["lat2d"].ravel()

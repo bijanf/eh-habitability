@@ -65,7 +65,7 @@ def run() -> dict:
     # carry the real WHI as the tier-(ii) field so this HAF matches the headline
     try:
         from . import whi as _whi
-        if os.path.exists(_whi.WHI_PATH):
+        if _whi.has_whi():
             B_whi, _, _ = _whi.load_whi_field(G)
             grid.set_baseline(B_whi, G)
     except Exception:
@@ -86,8 +86,19 @@ def run() -> dict:
 
     # correlation of HAF vs niche-habitable fraction over the projection (ssp245)
     nh245 = per_ssp["ssp245"]["niche_hab"]
+    g245 = per_ssp["ssp245"]["gmst_anom_1961_90"]
     fut = proj >= 1900
     r = float(np.corrcoef(haf245[fut], nh245[fut])[0, 1])
+    # partial correlation of HAF and niche controlling for GMST + slope divergence:
+    # both are near-deterministic nonlinear functions of the same warming, so the
+    # partial-r stays high (shared nonlinear GMST dependence) and the informative
+    # signal is the slope ratio, not the correlation.
+    rHG = float(np.corrcoef(haf245[fut], g245[fut])[0, 1])
+    rNG = float(np.corrcoef(nh245[fut], g245[fut])[0, 1])
+    den = np.sqrt((1 - rHG ** 2) * (1 - rNG ** 2))
+    partial = float((r - rHG * rNG) / den) if den > 0 else float("nan")
+    sH = float(np.polyfit(g245[fut], haf245[fut], 1)[0])
+    sN = float(np.polyfit(g245[fut], nh245[fut], 1)[0])
 
     def at(arr, yr):
         return float(arr[proj == yr][0])
@@ -106,6 +117,9 @@ def run() -> dict:
         "haf_2100_ssp245": at(haf245, 2100),
         "niche_hab_2100_ssp245": at(nh245, 2100),
         "haf_vs_niche_corr_ssp245": r,
+        "haf_vs_niche_partial_corr_given_gmst": partial,
+        "slope_haf_per_K": sH, "slope_niche_per_K": sN,
+        "slope_ratio_haf_over_niche": float(sH / sN) if sN else None,
         # arrays for plotting
         "years": proj, "haf245": haf245, "per_ssp": per_ssp,
     }
