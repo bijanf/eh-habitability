@@ -17,7 +17,7 @@ real forcing (AR6 ERF) + CO2  ─▶  FaIR 2-layer energy-balance climate core
 
 ```bash
 pip install -r eh_shallow/requirements.txt        # already satisfied in the project env
-python -m eh_shallow.run --n-particles 400 --n-temps 12 --outdir eh_shallow/out
+python -m eh_shallow.run --n-particles 500 --n-temps 12 --outdir eh_shallow/out
 ```
 
 Outputs (in `--outdir`): `haf.pdf` (headline Habitable-Area-Fraction trajectory),

@@ -170,6 +170,14 @@ def main(argv=None):
     trend = np.polyval(np.polyfit(oy[cal], og[cal], 1), oy)
     rmse_pers = float(np.sqrt(np.mean((last_cal - og[val]) ** 2)))
     rmse_trend = float(np.sqrt(np.mean((trend[val] - og[val]) ** 2)))
+    # cleanest sub-window 1981-2004 (before the OHC 2005-2020 constraint opens)
+    gm_at_oy = np.interp(oy, proj_years, gm_mean)
+    cln = (oy >= 1981) & (oy <= 2004)
+    def _rmse_over(a, m):
+        return float(np.sqrt(np.mean((a[m] - og[m]) ** 2)))
+    rmse_clean = _rmse_over(gm_at_oy, cln)
+    rmse_clean_pers = _rmse_over(np.full(len(oy), last_cal), cln)
+    rmse_clean_trend = _rmse_over(trend, cln)
     # OHC fit (2005-2020) of the posterior-mean run, on the 2005-2014 baseline
     ohc_rmse = None
     if post["obs_ohc"] is not None:
@@ -208,6 +216,11 @@ def main(argv=None):
             "gmst_rmse_linear_trend_K": rmse_trend,
             "skill_vs_persistence": 1.0 - rmse / rmse_pers if rmse_pers else None,
             "skill_vs_linear_trend": 1.0 - rmse / rmse_trend if rmse_trend else None,
+            "clean_window_1981_2004": {
+                "emulator_rmse_K": rmse_clean,
+                "persistence_rmse_K": rmse_clean_pers,
+                "linear_trend_rmse_K": rmse_clean_trend,
+            },
         },
         "ohc_fit_2005_2020": {"ohc_rmse_ZJ": ohc_rmse},
         "haf": {

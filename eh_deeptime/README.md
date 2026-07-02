@@ -32,7 +32,7 @@ probabilistic habitability metric into a deep-time Habitable Area Fraction.
 python -m eh_deeptime.run                  # the PETM illustration figure (Fig. 3)
 python -m eh_deeptime.framework            # full framework: 6 figures + metrics.json -> out/
 python -m eh_deeptime.framework --quick    # faster smoke run (smaller SMC/Sobol samples)
-python -m pytest -q tests/                 # offline test suite (49 sanity/plausibility checks)
+python -m pytest -q tests/                 # offline test suite (78 sanity/plausibility checks)
 ```
 
 Everything runs offline with numpy + scipy + matplotlib only. `framework.py` writes, into `out/`:
